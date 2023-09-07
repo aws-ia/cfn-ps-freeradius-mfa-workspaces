@@ -192,7 +192,7 @@ Parameters:
     Type: 'String'
   
 Conditions:
-  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-quickstart']
+  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-ia-us-east-1']
   WorkspaceVolumeEncryptionCheck: !Or [!Equals [!Ref UserVolumeEncryptionEnabled, "true"], !Equals [!Ref RootVolumeEncryptionEnabled, "true"]]
   
 Resources:

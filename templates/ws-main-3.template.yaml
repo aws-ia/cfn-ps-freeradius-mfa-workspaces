@@ -237,7 +237,7 @@ Parameters:
       hyphens (-), underscores (_), periods (.), asterisks (*), single quotes ('),
       open parenthesis ((), close parenthesis ()), and forward slashes (/). End the
       prefix with a forward slash.
-    Default: quickstart-freeradius-mfa-workspaces/
+    Default: cfn-ps-freeradius-mfa-workspaces/
     Description: >-
       S3 key prefix that is used to simulate a folder for your copy of the 
       deployment assets. Keep the default prefix unless you are customizing 
@@ -312,7 +312,7 @@ Parameters:
 Conditions:
   UsingDefaultBucket: !Equals 
     - !Ref QSS3BucketName
-    - aws-quickstart
+    - aws-ia-us-east-1
 Resources:
   Macro:
     Type: AWS::CloudFormation::Macro
