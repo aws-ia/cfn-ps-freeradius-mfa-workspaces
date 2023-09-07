@@ -1,6 +1,6 @@
 project:
   shorten_stack_name: true
-  name: quickstart-freeradius-mfa-workspaces
+  name: cfn-ps-freeradius-mfa-workspaces
   owner: workspace@example.com
   package_lambda: false
   regions:
@@ -32,7 +32,7 @@ tests:
       VPCCIDR: 10.0.0.0/16
       QSS3BucketName: $[taskcat_autobucket]
       QSS3BucketRegion: $[taskcat_current_region]
-      QSS3KeyPrefix: quickstart-freeradius-mfa-workspaces/
+      QSS3KeyPrefix: cfn-ps-freeradius-mfa-workspaces/
       PKI: 'No'
       EntCaServerInstanceType: t3.large
       EntCaDataDriveSizeGiB: '2'
@@ -70,7 +70,7 @@ tests:
       VPCCIDR: 10.0.0.0/16
       QSS3BucketName: $[taskcat_autobucket]
       QSS3BucketRegion: $[taskcat_current_region]
-      QSS3KeyPrefix: quickstart-freeradius-mfa-workspaces/
+      QSS3KeyPrefix: cfn-ps-freeradius-mfa-workspaces/
       PKI: 'No'
       EntCaServerInstanceType: t3.large
       EntCaDataDriveSizeGiB: '2'
