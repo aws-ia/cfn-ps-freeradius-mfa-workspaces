@@ -1,0 +1,231 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  This template creates Aurora RDS database, integrates LinOTP with the deployed Active Directory and configures FreeRADIUS server. The created domain user credentials will be used to configure AD integration. 
+  **WARNING** This template creates Amazon EC2 Linux instance, RDS database and related resources. You will be billed for the AWS resources used if you
+  create a stack from this template. (qs-1t9sl8r34)
+Metadata:
+  QuickStartDocumentation:
+    EntrypointName: 'Parameters for deploying Aurora RDS, LinOTP and FreeRADIUS Configuration'
+    Order: '3'
+  cfn-lint:
+    config:
+      ignore_checks:
+        - E9101
+        - W9006
+        - W9002
+        - W9003
+      ignore_reason:
+        - "Execution part SSM Automation"
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+        -   Label:
+                default: SNS/KMS configurations
+            Parameters:
+                - QuickStartAdminEmail
+    ParameterLabels:
+        QuickStartAdminEmail:
+            default: QuickStart Admin Email for notification to be sent to
+Parameters:
+    ## SNS Configuration
+    QuickStartAdminEmail:
+        Default: workspaces@example.com
+        Description: 'The QuickStart Admin Email that notification will be sent to upon Successful creation'
+        Type: String
+        AllowedPattern: '[^@]+@[^@]+\.[^@]+'
+
+Resources:
+  KMSAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "KMSAdminRole-${AWS::StackName}-${AWS::Region}"
+      Policies:
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+                - kms:CreateKey
+              Resource: '*'
+          PolicyName: "KMSAdminRole_AssumedRolePolicy"
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - kms.amazonaws.com
+            Action: sts:AssumeRole
+  SNSTopicKMSKey:
+    Metadata:
+        cfn-lint:
+          config:
+            ignore_checks:
+              - EIAMPolicyWildcardResource
+            ignore_reasons:
+              - EIAMPolicyWildcardResource: "Scope is limited to least privilege"
+    Type: AWS::KMS::Key
+    Properties:
+      Description: 'KMS Key for SNS Topic'
+      EnableKeyRotation: true
+      PendingWindowInDays: 20
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-default-1
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action:
+              - kms:PutKeyPolicy
+              - kms:CreateAlias
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:UpdateKeyDescription
+              - kms:SynchronizeMultiRegionKey
+              - kms:UpdateAlias
+              - kms:GetKeyPolicy
+              - kms:VerifyMac
+              - kms:ListRetirableGrants
+              - kms:DeleteImportedKeyMaterial
+              - kms:Decrypt
+              - kms:DeleteCustomKeyStore
+              - kms:Encrypt
+              - kms:GetPublicKey
+              - kms:GenerateDataKeyPair
+              - kms:ReplicateKey
+              - kms:DisableKeyRotation
+              - kms:Sign
+              - kms:RevokeGrant
+              - kms:GenerateDataKeyPairWithoutPlaintext
+              - kms:GetParametersForImport
+              - kms:GenerateRandom
+              - kms:GenerateMac
+              - kms:TagResource 
+              - kms:DescribeCustomKeyStores
+              - kms:CancelKeyDeletion
+              - kms:CreateGrant
+              - kms:DescribeKey
+              - kms:ReEncryptFrom
+              - kms:ListGrants
+              - kms:ListKeys
+              - kms:ConnectCustomKeyStore
+              - kms:UpdatePrimaryRegion
+              - kms:GenerateDataKey
+              - kms:DeleteAlias
+              - kms:ListKeyPolicies
+              - kms:UntagResource
+              - kms:DisableKey
+              - kms:UpdateCustomKeyStore
+              - kms:EnableKeyRotation
+              - kms:DisconnectCustomKeyStore
+              - kms:ImportKeyMaterial
+              - kms:CreateKey
+              - kms:ListAliases
+              - kms:RetireGrant
+              - kms:ListResourceTags
+              - kms:ScheduleKeyDeletion
+              - kms:Verify
+              - kms:EnableKey
+              - kms:ReEncryptTo
+              - kms:GetKeyRotationStatus
+              - kms:CreateCustomKeyStore
+            Resource: '*'
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt KMSAdminRole.Arn
+            Action:
+              - kms:CreateAlias
+              - kms:CreateCustomKeyStore
+              - kms:CreateKey
+              - kms:CreateGrant
+              - kms:DescribeCustomKeyStores
+              - kms:DescribeKey
+              - kms:EnableKeyRotation
+              - kms:EnableKey
+              - kms:ListKeys
+              - kms:ListGrants
+              - kms:ListResourceTags
+              - kms:ListKeyPolicies
+              - kms:ListRetirableGrants
+              - kms:ListAliases
+              - kms:PutKeyPolicy
+              - kms:UpdateKeyDescription
+              - kms:UpdateAlias
+              - kms:UpdateCustomKeyStore
+              - kms:UpdatePrimaryRegion
+              - kms:RevokeGrant
+              - kms:DisableKeyRotation
+              - kms:DisableKey
+              - kms:GetPublicKey
+              - kms:GetParametersForImport
+              - kms:GetKeyRotationStatus
+              - kms:GetKeyPolicy
+              - kms:DeleteAlias
+              - kms:DeleteImportedKeyMaterial
+              - kms:DeleteCustomKeyStore
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: '*'
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt SNSDeliveryLambdaExecutionRole.Arn
+            Action:
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+            Resource: '*'
+  SNSStackStatusTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-SNS-Topic'
+      KmsMasterKeyId: !GetAtt SNSTopicKMSKey.KeyId
+      Subscription:
+        - Endpoint: !Ref QuickStartAdminEmail
+          Protocol: email
+  SNSDeliveryLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: sns-delivery-lambda-execution-role-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource:
+              - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+            - Effect: Allow
+              Action:
+               -  'sns:Publish'
+              Resource:
+               -  !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${AWS::StackName}-SNS-Topic'
+Outputs:
+  KMSARN:
+    Description: SNS Topic KMS Key ARN.
+    Value: !GetAtt SNSTopicKMSKey.Arn
+  SNSStackTopic:
+    Description: SNS Topic.
+    Value: !Ref SNSStackStatusTopic
+  SNSDeliveryLambdaExecutionRole:
+    Description: ARN of SNS Lambda Execution Role
+    Value: !GetAtt SNSDeliveryLambdaExecutionRole.Arn

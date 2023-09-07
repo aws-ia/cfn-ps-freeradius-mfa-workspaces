@@ -1,0 +1,1246 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  This template creates Aurora RDS database, integrates LinOTP with the deployed Active Directory and configures FreeRADIUS server. The created domain user credentials will be used to configure AD integration. 
+  **WARNING** This template creates Amazon EC2 Linux instance, RDS database and related resources. You will be billed for the AWS resources used if you
+  create a stack from this template. (qs-1t9sl8r34)
+Metadata:
+  QuickStartDocumentation:
+    EntrypointName: 'Parameters for deploying Aurora RDS, LinOTP and FreeRADIUS Configuration'
+    Order: '3'
+  cfn-lint:
+    config:
+      ignore_checks:
+        - E9101
+        - W9006
+        - W9002
+        - W9003
+      ignore_reason:
+        - "Execution part SSM Automation"
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: VPC Configuration.
+        Parameters:
+          - VPCID
+    ParameterLabels:
+      PrivateSubnet1ID:
+        default: Private Subnet 1 ID
+      PrivateSubnet2ID:
+        default: Private Subnet 2 ID
+Parameters:
+  LinOTPDBName:
+    Type: String
+    Default: LINOTP
+    Description: Specify an RDS Database name.
+  LinOTPAdminPassword:
+    AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
+    Description: Password for the account used to manage user enrollment, management of LinOTP portal. Must be at least 8 characters containing letters, numbers and symbols
+    MaxLength: '32'
+    MinLength: '5'
+    NoEcho: 'true'
+    Type: String
+  LinOTPReamlName:
+    AllowedPattern: '[a-zA-Z0-9]*'
+    Default: QSWSRealm
+    Description: Realm Name for LinOTP/LDAP Integration. Min 5 or Max 12 characters
+    MaxLength: '12'
+    MinLength: '5'
+    NoEcho: 'true'
+    Type: String
+  DomainUserSecretsArn:
+    Type: String
+    Default: DomainUserSecrets
+    Description: ARN of Domain User Secrets
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  RADIUSServerInstanceType:
+    AllowedValues:
+      - t2.medium
+      - t3.medium
+      - t2.large
+      - t3.large
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+    Default: t3.large
+    Description: Amazon EC2 instance type for the RADIUS Server
+    Type: String
+  RADIUSServerName:
+    AllowedPattern: '[a-zA-Z0-9\-]+'
+    Default: RADIUS-SVR-1
+    Description: NetBIOS name of RADIUS Server (up to 15 characters)
+    MaxLength: '15'
+    MinLength: '1'
+    Type: String
+  EbsEncryptionKmsKeyId:
+    Default: alias/aws/ebs
+    Description: The identifier of the AWS KMS key to use for Amazon EBS encryption. You can specify the KMS key using any of the following; Key ID, Key alias, Key ARN, Alias ARN
+    Type: String
+  VPCID:
+    Default: 'vpc-xxxxx'
+    Description: VPC ID for Workspaces
+    Type: String
+  VPCCIDR:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.0.0/16
+    Description: CIDR Block for the VPC
+    Type: String
+  PrivateSubnet1ID:
+    Description: Choose the ID of the private subnet 1 in Availability Zone 1 (e.g., subnet-a0246dcd)
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnet2ID:
+    Description: Choose the ID of the private subnet 2 in Availability Zone 2 (e.g., subnet-a0246dcd)
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnet1ID:
+    Description: ID of the public subnet 1 that you will be used for ALB(for example, subnet-a0246dcd).
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnet2ID:
+    Description: ID of the public subnet 2 that will be used for ALB(for example, subnet-e3246d8e).
+    Type: AWS::EC2::Subnet::Id
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instances
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.0.0/16
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  LinuxLatestAMI:
+    Description: Latest Linux AMI stored by Amazon in SSM Parameter Store
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  SNSDeliveryLambdaExecutionRole:
+    Description: Execution role for SNS publisher Lambda 
+    Type: String
+    Default: ''
+  SNSStackStatusTopic:
+    Description: Topic subscribed by user earlier and exported by parent stack
+    Type: String
+    Default: ''
+
+Resources:
+  LinOTPConfigurationDoc:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Name: !Sub "LinOTPConfigDoc-${AWS::StackName}-${AWS::Region}"
+      Tags:
+        - Key: StackName
+          Value: !Ref AWS::StackName
+      Content:
+        description: Configures LinOTP DB and installs FreeRADIUS
+        schemaVersion: '0.3'
+        assumeRole: '{{AutomationAssumeRole}}'
+        parameters:
+          InstanceId:
+            description: "ID of the instance."
+            type: "String" 
+          ASGName:
+            description: "Auto Scaling group name."
+            type: "String"
+          PrivateSubnet1ID:
+            type: String
+            description: "(Required) Private Subnet 1 ID of the AWS Managed AD."
+          PrivateSubnet2ID:
+            type: String
+            description: "(Required) Private Subnet 2 ID of the AWS Managed AD."
+          RADIUSServerName:
+            default: 'RADIUS-SVR-1'
+            description: 'NetBIOS name of RADIUS Server (up to 15 characters)'
+            type: 'String'
+          VPCID:
+            type: String
+            description: "(Required) VPC ID of the AWS Managed AD."
+          StackName:
+            default: ''
+            description: 'Stack Name Input for cfn resource signal'
+            type: 'String'
+          AutomationAssumeRole:
+            type: String
+            default: ''
+        mainSteps:
+          - name: waitUntilInstanceStateRunning
+            action: aws:waitForAwsResourceProperty
+            timeoutSeconds: 600
+            inputs:
+              Service: ec2
+              Api: DescribeInstanceStatus
+              InstanceIds:
+                - "{{InstanceId}}"
+              PropertySelector: "$.InstanceStatuses[0].InstanceState.Name"
+              DesiredValues:
+                - running
+          - name: assertInstanceStateRunning
+            action: aws:assertAwsResourceProperty
+            inputs:
+              Service: ec2
+              Api: DescribeInstanceStatus
+              InstanceIds:
+                - "{{InstanceId}}"
+              PropertySelector: "$.InstanceStatuses[0].InstanceState.Name"
+              DesiredValues:
+                - running
+          - name: UpdateOS
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              Parameters:
+                commands:
+                  - sudo yum update -y
+            description: This step will update the Amazon Linux Operating System
+          - name: AddLinOTPRepo
+            action: 'aws:runCommand'
+            inputs:
+              Parameters:
+                commands:
+                  - sudo amazon-linux-extras install epel -y
+                  - sudo yum localinstall http://dist.linotp.org/rpm/el7/linotp/x86_64/Packages/LinOTP_repos-1.1-1.el7.x86_64.rpm -y
+                  - sudo sed -i 's,http://linotp.org/rpm/el7/dependencies/x86_64, http://dist.linotp.org/rpm/el7/dependencies/x86_64,g' /etc/yum.repos.d/linotp.repo
+                  - sudo sed -i 's,http://linotp.org/rpm/el7/linotp/x86_64, http://dist.linotp.org/rpm/el7/linotp/x86_64,g' /etc/yum.repos.d/linotp.repo
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+            description: Add LinOTP Repository
+          - name: InstallAndConfigureModules
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - | 
+                    sudo yum install -y LinOTP LinOTP_mariadb
+                    sudo restorecon -Rv /etc/linotp2/
+                    sudo restorecon -Rv /var/log/linotp
+                    sudo yum install yum-plugin-versionlock -y
+                    sudo yum versionlock python-repoze-who
+                    sudo yum install LinOTP_apache -y
+                    sudo yum install jq -y
+            description: This will install and Configure LinOTP and Apache (httpd)
+          - name: ConfigureDatabase
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - |
+                    LANG=C
+                    ENCKEY=encKey
+                    LINOTP_CONF_DIR=/etc/linotp2
+                    LINOTP_INI=$LINOTP_CONF_DIR/linotp.ini
+                    REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+                    DB_NAME=LINOTP
+                    DB_USER=linotp
+                    DB_HOST=$(aws ssm get-parameter --region $REGION --name "/LinOTP/Config/DB/RDSEndpoint" | jq -r '.Parameter.Value')
+                    SECRET_ID=MFADBSecret
+
+                    echo -e "Welcome to the database setup script for LinOTP!"
+                    echo "Please be aware that you have to install LinOTP before you start this script."
+                    echo "------------------------------------------------------------------------------------------"
+
+                    #Check if the database key exists as a nonempty file and create one in case it is not present.
+                    if ! [ -s /etc/linotp2/encKey ]
+                    then
+                        echo "Create database key - this may take a while. Please be patient."
+                      echo "--------------------------------------------------"
+                        if ! ( dd if=/dev/urandom of="$LINOTP_CONF_DIR/$ENCKEY" bs=1 count=128 && chown linotp "$LINOTP_CONF_DIR/$ENCKEY" && chmod 640 "$LINOTP_CONF_DIR/$ENCKEY" )
+                        then
+                        echo -e "Creating of database key failed. Exiting script..." 1>&2
+                            exit 6
+                        else
+                        echo -e "Database key was successfully generated."
+                        fi
+                    fi
+
+                    unset DB_PASS
+                    DB_PASS=$(aws secretsmanager get-secret-value --region $REGION --secret-id $SECRET_ID | jq -r .SecretString | jq -r .password)
+                    if [ -z "$DB_PASS" ]
+                    then
+                        echo -e "Password could not be generated" 1>&2
+                        echo -e "Exiting program" 1>&2
+                        exit 10
+                    fi
+
+                    echo "--------------------------------------------------"
+                    echo ""
+                    echo "Preparing linotp.ini for initial setup...."
+
+                    DATE=$(date +%Y%m%d-%H%M%S)
+
+                    if [ -e /etc/linotp2/linotp.ini ]
+                    then
+                      echo "$LINOTP_INI already exists. A backup is created..."
+                      cp -a "$LINOTP_INI" "$LINOTP_INI.backup.$DATE"
+                    fi
+
+                    echo "Creating $LINOTP_INI from $LINOTP_CONF_DIR/linotp.ini.example for initial setup..."
+
+                    cp -a $LINOTP_CONF_DIR/linotp.ini.example $LINOTP_INI
+                    sed -i -re "s%^sqlalchemy.url =.*%sqlalchemy.url = mysql://$DB_USER:$DB_PASS@$DB_HOST/$DB_NAME%" $LINOTP_INI
+                    echo "--------------------------------------------------"
+                    echo ""
+            description: This will configure LinOTP Database connection
+
+          - name: ConfigureAndEnableApacheService
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - |
+                    sudo systemctl enable httpd
+                    sudo systemctl start httpd
+                    sudo mv /etc/httpd/conf.d/ssl.conf /etc/httpd/conf.d/ssl.conf.back
+                    sudo mv /etc/httpd/conf.d/ssl_linotp.conf.template /etc/httpd/conf.d/ssl_linotp.conf
+            description: Configure And Enable Apache Service
+
+          - name: InstallPythonModulesForLinOTP
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - |
+                    yes | sudo yum install pip
+                    yes | sudo pip install linotpadminclientgui linotpadminclientcli pathlib pyusb
+                    sudo cp /etc/pki/tls/certs/localhost.crt /etc/pki/ca-trust/source/anchors/
+                    sudo update-ca-trust extract
+            description: This step will install Python modules for LinOTPadm client and CLI.
+          
+          - name: ChangeLinOTPDefaultPasswrd
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - |
+                    REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+                    REALM="LinOTP2 admin area"
+                    DIGESTFILE=/etc/linotp2/admins
+                    USER=admin
+                    AdminPassword=LinOTPAdminSecret
+                    PASSWORD=$(aws secretsmanager get-secret-value --region $REGION --secret-id $AdminPassword | jq -r .SecretString | jq -r .password)
+
+                    PWDIGEST=`echo -n "$USER:$REALM:$PASSWORD" | md5sum | cut -f1 -d ' '`
+                    echo "$USER:$REALM:$PWDIGEST" | sudo tee $DIGESTFILE
+
+            description: This step will change the LinOTP default password.
+          - name: RestartApache1
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - sudo systemctl restart httpd
+            description: This step will restart the httpd service
+          - name: ConfigureADIntegrationOnLinOTP
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - |
+                    REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+
+                    AdminPassword=LinOTPAdminSecret
+                    LinOTPADMINPASSWORD=$(aws secretsmanager get-secret-value --region $REGION --secret-id $AdminPassword | jq -r .SecretString | jq -r .password)
+
+                    ADUSER=DomainUserSecret
+                    
+
+                    ADUSERPASS=$(aws secretsmanager get-secret-value --region $REGION --secret-id $ADUSER | jq -r .SecretString | jq -r .password)
+                    BINDDN=$(aws ssm get-parameter --region $REGION --name "/LinOTP/Config/AD/BindDN" | jq -r '.Parameter.Value')
+                    BASEDN=$(aws ssm get-parameter --region $REGION --name "/LinOTP/Config/AD/BaseDN" | jq -r '.Parameter.Value')
+                    DNSSERVERS=$(aws ssm get-parameter --region $REGION --name "/LinOTP/Config/AD/DNSServers" | jq -r '.Parameter.Value')
+
+                    DNS1=$(echo $DNSSERVERS | grep -E -o "^([0-9]{1,3}[\.]){3}[0-9]{1,3}")
+                    DNS2=$(echo $DNSSERVERS | grep -E -o "(([0-9]{1,3}[\.]){3}[0-9]{1,3})$")
+
+                    LDAP1=$(echo "ldap://${DNS1}")
+                    LDAP2=$(echo "ldap://${DNS2}")
+                    LOCALIP=$(hostname)
+                    
+                    URL=$(echo "https://$LOCALIP:443")
+
+                    RealmName=LinOTPReamlNameSecret
+                    CXRealmName=$(aws secretsmanager get-secret-value --region $REGION --secret-id $RealmName | jq -r .SecretString | jq -r .password)
+
+                    # ADMINPASS=$(aws secretsmanager get-secret-value --region $REGION --secret-id $SECRET_ID | jq -r .SecretString | jq -r .password)
+
+                    linotpadm.py --url=$URL --admin=admin --password=$LinOTPADMINPASSWORD --command=setresolver --resolver=ADldap --rtype=LDAP --rl_uri=$LDAP1,$LDAP2 --rl_basedn="$BASEDN" --rl_binddn="$BINDDN" --rl_bindpw="$ADUSERPASS" --key=/etc/pki/tls/private/localhost.key --cert=/etc/pki/tls/certs/localhost.crt --rl_loginattr=sAMAccountName --rl_searchfilter='(sAMAccountName=*)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2))' --rl_userfilter='(&(sAMAccountName=%s)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))' --rl_attrmap='{ "username": "sAMAccountName", "phone" : "telephoneNumber", "mobile" : "mobile", "email" : "mail", "surname" : "sn", "givenname" : "givenName" }' --rl_timeout=5
+                    linotpadm.py --url=$URL --admin=admin --password=$LinOTPADMINPASSWORD --command=setrealm --realm=$CXRealmName --resolver=useridresolver.LDAPIdResolver.IdResolver.ADldap
+                    linotpadm.py --url=$URL --admin=admin --password=$LinOTPADMINPASSWORD --command=setdefaultrealm --realm=$CXRealmName
+            description: This will Configure AD Integration on LinOTP
+          - name: InstallFreeRadius
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - sudo yum install freeradius freeradius-perl freeradius-utils perl-App-cpanminus perl-LWP-Protocol-https perl-Try-Tiny git -y
+            description: This step will install FreeRadius
+          - name: ConfigureFreeRadius
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - | 
+                    sudo cpanm Config::File
+                    sudo mv /etc/raddb/clients.conf /etc/raddb/clients.conf.back
+                    sudo mv /etc/raddb/users /etc/raddb/users.back
+                    RADSECRET_ID=RADIUSSharedSecret
+                    REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+                    MACADDRESS=$(curl --silent http://169.254.169.254/latest/meta-data/mac)
+                    CIDR=$(curl --silent http://169.254.169.254/latest/meta-data/network/interfaces/macs/${MACADDRESS}/vpc-ipv4-cidr-block)
+                    RADSECRET=$(aws secretsmanager get-secret-value --region $REGION --secret-id $RADSECRET_ID | jq -r .SecretString | jq -r .password)
+                    VPCIP="$(cut -d'/' -f1 <<<"$CIDR")"
+                    VPCNETMASK="$(cut -d'/' -f2 <<<"$CIDR")"
+                    cat <<-EOF >/etc/raddb/clients.conf
+                    client localhost {
+                    ipaddr  = 127.0.0.1
+                    netmask = 32
+                    secret  = '$RADSECRET'
+                    }
+                    client adconnector {
+                    ipaddr  = $VPCIP
+                    netmask = $VPCNETMASK
+                    secret  = '$RADSECRET'
+                    }
+                    EOF
+
+                    # Download the freeradius linotp perl module
+                    sudo git clone https://github.com/LinOTP/linotp-auth-freeradius-perl.git /usr/share/linotp/linotp-auth-freeradius-perl
+
+                    # Setup the linotp perl module
+                    cat << 'EOF' >/etc/raddb/mods-available/perl
+                    perl {
+                    filename = /usr/share/linotp/linotp-auth-freeradius-perl/radius_linotp.pm
+                    }
+                    EOF
+
+                    # Activate it
+                    sudo ln -s /etc/raddb/mods-available/perl /etc/raddb/mods-enabled/perl
+          - name: ConfigurePerlModule
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                - |
+                  # Configure Perl module for FreeRADIUS
+                  REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+                  RealmName=LinOTPReamlNameSecret
+                  CXRealmName=$(aws secretsmanager get-secret-value --region $REGION --secret-id $RealmName | jq -r .SecretString | jq -r .password)
+
+                  sudo cat <<-EOF >/etc/linotp2/rlm_perl.ini
+                  #IP of the linotp server
+                  URL=https://localhost/validate/simplecheck
+                  #optional: limits search for user to this realm
+                  REALM=$CXRealmName
+                  #optional: only use this UserIdResolver
+                  #RESCONF=flat_file
+                  #optional: comment out if everything seems to work fine
+                  Debug=True
+                  #optional: use this, if you have selfsigned certificates, otherwise comment out
+                  SSL_CHECK=False
+                  EOF
+
+                  # Remove the default-links for activated configurations
+                  sudo rm /etc/raddb/sites-enabled/{inner-tunnel,default}
+                  sudo rm /etc/raddb/mods-enabled/eap
+            description: This step configures the Perl module of FREERADIUS
+     
+          - name: ConfigureLinOTPSite
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                - |
+                    sudo cat <<-EOF >/etc/raddb/sites-available/linotp
+                    server default {
+                    listen {
+                    type = auth
+                    ipaddr = *
+                    port = 0
+                    limit {
+                    max_connections = 16
+                    lifetime = 0
+                    idle_timeout = 30
+                    }
+                    }
+                    listen {
+                    ipaddr = *
+                    port = 0
+                    type = acct
+                    }authorize {
+                    preprocess
+                    IPASS
+                    suffix
+                    ntdomain
+                    files
+                    expiration
+                    logintime
+                    update control {
+                    Auth-Type := Perl
+                    }
+                    pap
+                    }authenticate {
+                    Auth-Type Perl {
+                    perl
+                    }
+                    }preacct {
+                    preprocess
+                    acct_unique
+                    suffix
+                    files
+                    }accounting {
+                    detail
+                    unix
+                    -sql
+                    exec
+                    attr_filter.accounting_response
+                    }session {
+                    }
+                    post-auth {
+                    update {
+                    &reply: += &session-state:
+                    }
+                    -sql
+                    exec
+                    remove_reply_message_if_eap
+                    }
+                    }
+                    EOF
+
+            description: This step configures the Perl module of FREERADIUS
+                                
+          - name: StartRadiusD
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - sudo ln -s /etc/raddb/sites-available/linotp /etc/raddb/sites-enabled/linotp
+                  - sudo systemctl enable radiusd
+                  - sudo systemctl start radiusd
+            description: This step will enable, start RADIUSD service and enable the sites for RADIUS authentication
+
+          - name: RestartApache2
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              Parameters:
+                commands:
+                  - sudo systemctl restart httpd
+            description: This step will restart the httpd service
+
+          - name: ImportSelfSignedCert_to_ACM_Add_ALB_HTTPS_Listener
+            action: 'aws:runCommand'
+            nextStep: EnableRADIUS
+            onFailure: step:UpdateALBListener
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - |
+                    REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+                    # Create Self Signed certificate and Import to ACM 
+                    sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout albserver.key -out albserver.crt -subj "/C=US/ST=WA/L=Seattle/O=WorkSpaces/OU=End User Computing/CN=*.$REGION.elb.amazonaws.com"
+                    
+                    # aws acm import-certificate --certificate file://albserver.crt --private-key file://albserver.key --region $REGION
+                    ALBCertArn=$(aws acm import-certificate --certificate file://albserver.crt --private-key file://albserver.key --region $REGION | jq -r .CertificateArn)
+                    
+                    # Get LinOTP ALB and TargetGroup ARNs 
+                    ALBArn=$(aws elbv2 describe-load-balancers --region $REGION | jq -r '.LoadBalancers[]|select(.LoadBalancerName | contains ("LinOT")).LoadBalancerArn')
+                    ALBTGArn=$(aws elbv2 describe-target-groups --load-balancer-arn $ALBArn --region $REGION | jq -r '.TargetGroups[].TargetGroupArn')
+                    
+                    # Add LinOTP ALBArn HTTPS Listener
+                    aws elbv2 create-listener --load-balancer-arn $ALBArn --protocol HTTPS --port 443 --certificates CertificateArn=$ALBCertArn --ssl-policy ELBSecurityPolicy-2015-05 --default-actions Type=forward,TargetGroupArn=$ALBTGArn --region $REGION
+            
+            description: This step will create self-signed certificate, import to ACM and use it to create https Listerner in ALB
+
+          - name: UpdateALBListener
+            action: 'aws:runCommand'
+            nextStep: EnableRADIUS
+            onFailure: step:CFNSignalEnd
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              CloudWatchOutputConfig:
+                CloudWatchOutputEnabled: "true"
+                CloudWatchLogGroupName: !Sub "/QuickStart/radius/${AWS::StackName}/RADIUSConfiguration"
+              Parameters:
+                commands:
+                  - |
+                    REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+                    # Create Self Signed certificate and Import to ACM 
+                    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout albserver.key -out albserver.crt -subj "/C=US/ST=WA/L=Seattle/O=WorkSpaces/OU=End User Computing/CN=*.$REGION.elb.amazonaws.com"
+                    
+                    # aws acm import-certificate --certificate file://albserver.crt --private-key file://albserver.key --region $REGION
+                    ALBCertArn=$(aws acm import-certificate --certificate file://albserver.crt --private-key file://albserver.key --region $REGION | jq -r .CertificateArn)
+                    
+                    # Get LinOTP ALB, TargetGroup and Listener ARNs 
+                    ALBArn=$(aws elbv2 describe-load-balancers --region $REGION | jq -r '.LoadBalancers[]|select(.LoadBalancerName | contains ("LinOT")).LoadBalancerArn')
+                    ALBTGArn=$(aws elbv2 describe-target-groups --load-balancer-arn $ALBArn --region $REGION | jq -r '.TargetGroups[].TargetGroupArn')
+                    ALBListerARN=$(aws elbv2 describe-listeners --load-balancer-arn $ALBArn --region $REGION | jq -r '.Listeners[]|select(.Protocol | contains ("HTTPS")).ListenerArn')
+                    
+                    # Update ALB HTTPS Listener if Adding new one failed. This is useful if the instance terminates and automation needs to rerun. 
+                    aws elbv2 modify-listener --listener-arn $ALBListerARN --certificates CertificateArn=$ALBCertArn --region $REGION
+            
+
+          - name: EnableRADIUS
+            action: 'aws:runCommand'
+            nextStep: CFNSignalEnd
+            onFailure: step:UpdateRADIUS
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              Parameters:
+                commands:
+                - | 
+                    RADSECRET_ID=RADIUSSharedSecret
+                    REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+                    MACADDRESS=$(curl --silent http://169.254.169.254/latest/meta-data/mac)
+                    CIDR=$(curl --silent http://169.254.169.254/latest/meta-data/network/interfaces/macs/${MACADDRESS}/vpc-ipv4-cidr-block)
+                    VPCIP="$(cut -d'/' -f1 <<<"$CIDR")"
+                    HOSTIP=$(hostname -I | awk '{print $1}')
+                    RADSECRET=$(aws secretsmanager get-secret-value --region $REGION --secret-id $RADSECRET_ID | jq -r .SecretString | jq -r .password)
+                    DIRECTORYID=$(aws ssm get-parameter --region $REGION --name "WSDirectoryId" | jq -r '.Parameter.Value')
+                    
+                    aws ds enable-radius --directory-id=$DIRECTORYID --radius-settings RadiusServers=$HOSTIP,RadiusPort=1812,RadiusTimeout=50,RadiusRetries=4,SharedSecret=$RADSECRET,AuthenticationProtocol=PAP,DisplayLabel=FreeRADIUS --region=$REGION
+
+            description: This step will enable MFA on the registered Directory Service.
+
+          - name: UpdateRADIUS
+            action: 'aws:runCommand'
+            nextStep: CFNSignalEnd
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              Parameters:
+                commands:
+                - | 
+                    RADSECRET_ID=RADIUSSharedSecret
+                    REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+                    MACADDRESS=$(curl --silent http://169.254.169.254/latest/meta-data/mac)
+                    CIDR=$(curl --silent http://169.254.169.254/latest/meta-data/network/interfaces/macs/${MACADDRESS}/vpc-ipv4-cidr-block)
+                    VPCIP="$(cut -d'/' -f1 <<<"$CIDR")"
+                    HOSTIP=$(hostname -I | awk '{print $1}')
+                    RADSECRET=$(aws secretsmanager get-secret-value --region $REGION --secret-id $RADSECRET_ID | jq -r .SecretString | jq -r .password)
+                    DIRECTORYID=$(aws ssm get-parameter --region $REGION --name "WSDirectoryId" | jq -r '.Parameter.Value')
+                    
+                    aws ds update-radius --directory-id=$DIRECTORYID --radius-settings RadiusServers=$HOSTIP,RadiusPort=1812,RadiusTimeout=50,RadiusRetries=4,SharedSecret=$RADSECRET,AuthenticationProtocol=PAP,DisplayLabel=FreeRADIUS --region=$REGION
+
+            description: This step will update MFA on the registered Directory Service if enable-radius fails. 
+
+          - name: CFNSignalEnd
+            action: 'aws:branch'
+            inputs:
+              Choices:
+                - Not:
+                    StringEquals: ''
+                    Variable: '{{StackName}}'
+                  NextStep: signalsuccess
+                - StringEquals: ''
+                  Variable: '{{StackName}}'
+                  NextStep: sleepend
+          - name: signalsuccess
+            action: 'aws:executeAwsApi'
+            inputs:
+              Status: SUCCESS
+              UniqueId: '{{InstanceId}}'
+              LogicalResourceId: RadiusServerAutoScalingGroup
+              Service: cloudformation
+              Api: SignalResource
+              StackName: '{{StackName}}'
+          - name: sleepend
+            action: 'aws:sleep'
+            inputs:
+              Duration: PT1S
+            isEnd: true
+          - name: signalfailure
+            action: 'aws:executeAwsApi'
+            inputs:
+              Status: FAILURE
+              UniqueId: '{{InstanceId}}'
+              LogicalResourceId: RadiusServerAutoScalingGroup
+              Service: cloudformation
+              Api: SignalResource
+              StackName: '{{StackName}}'
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: MFADBSecret
+      Description: "This secret has a dynamically generated secret password."
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "linotp"}'
+        GenerateStringKey: "password"
+        PasswordLength: 32
+        ExcludePunctuation: true
+  
+  RADIUSSharedSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: RADIUSSharedSecret
+      Description: "This secret has a dynamically generated secret password for shared secret in RADIUS configuration"
+      GenerateSecretString:
+        SecretStringTemplate: '{"name": "sharedsecret"}'
+        GenerateStringKey: "password"
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  LinOTPAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: LinOTPAdminSecret
+      Description: LinOTP Admin User Secrets for LinOTP Portal
+      SecretString: !Sub '{"username":"admin","password":"${LinOTPAdminPassword}"}'
+
+  LinOTPReamlNameSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: LinOTPReamlNameSecret
+      Description: Realm Name for LinOTP/LDAP Integration 
+      SecretString: !Sub '{"name":"Realm Name","password":"${LinOTPReamlName}"}'
+
+  RADIUSDBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DatabaseName: !Ref LinOTPDBName # <-- Reference Database Name Parameter
+      Engine: aurora-mysql
+      EngineMode: serverless
+      EngineVersion: 5.7.12
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}' ]]
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}' ]]
+      DBClusterIdentifier: !Join ["-", [ "RadiusDB", !Ref "AWS::Region" ]]
+      DeletionProtection: false
+      EnableHttpEndpoint: true
+      StorageEncrypted: true
+      ScalingConfiguration:
+        AutoPause: true
+        MinCapacity: 1
+        MaxCapacity: 8
+        SecondsUntilAutoPause: 1000
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VpcSecurityGroupIds:
+      - !GetAtt DBEC2SecurityGroup.GroupId
+
+  DBEC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: EC2 Security Group for RDS Database
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '3306'
+        ToPort: '3306'
+        CidrIp : !Ref VPCCIDR
+  
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Radius MFA/DB Subnet Group
+      SubnetIds:
+        - !Ref PrivateSubnet1ID
+        - !Ref PrivateSubnet2ID
+  
+  RDSEndpoint:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /LinOTP/Config/DB/RDSEndpoint
+      Type: StringList
+      Value: !GetAtt RADIUSDBCluster.Endpoint.Address
+      Description: SSM Parameter of type StringList.
+
+  RADSVRRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub "RADSVRRole-${AWS::StackName}-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - ssm.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMPatchAssociation'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonSSMAutomationRole'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
+      Policies:
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:ListSecretVersionIds
+                  - secretsmanager:ListSecrets
+                Resource:
+                  - !Ref 'RDSSecret'
+                  - !Ref 'DomainUserSecretsArn'
+                  - !Ref 'RADIUSSharedSecret'
+                  - !Ref 'LinOTPAdminSecret'
+                  - !Ref 'LinOTPReamlNameSecret'
+          PolicyName: SecretsAccessPolicy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ssm:DescribeInstanceInformation
+                  - ssm:ListCommands
+                  - ssm:ListCommandInvocations
+                Resource: '*'
+              - Effect: Allow
+                Action: cloudformation:SignalResource
+                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
+          PolicyName: AWS-Mgmt-Quick-Start-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:*:document/AWS-RunShellScript
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:*:document/AWS-RunRemoteScript
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/LinOTP/Config/AD/*
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/WSDirectoryId
+          PolicyName: AWS-SSM-Automation-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ds:DisableRadius
+                  - ds:EnableRadius
+                  - ds:UpdateRadius
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ds:${AWS::Region}:${AWS::AccountId}:directory/*
+          PolicyName: QuickStart-EnableRadius-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeListeners
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:CreateListener
+                  - elasticloadbalancing:ModifyListener
+                Resource:
+                  - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:loadbalancer/app/*/*
+                  - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:listener/app/*/*/*
+              - Effect: Allow
+                Action:
+                  - acm:ImportCertificate
+                Resource:
+                  - !Sub arn:${AWS::Partition}:acm:${AWS::Region}:${AWS::AccountId}:certificate/*            
+          PolicyName: ImportACMCert-Add-HTTPS-ALB-Listerner
+  RadiusMFAInstanceProfileRole:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Roles:
+        - !Ref RADSVRRole
+  EventBridgeSSMAutoRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "EventBdg-${AWS::StackName}-${AWS::Region}"
+      Policies:
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+                - ssm:StartAutomationExecution
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${LinOTPConfigurationDoc}:$DEFAULT'
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource:
+                - !GetAtt RADSVRRole.Arn
+              Condition: {"StringLikeIfExists": {"iam:PassedToService": "ssm.amazonaws.com"}}
+          PolicyName: "EventBridge_Execute_SSM_Automation"
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+  LinOTPPortalALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Subnets:
+        - !Ref 'PublicSubnet1ID'
+        - !Ref 'PublicSubnet2ID'
+      Scheme: internet-facing
+      SecurityGroups: 
+        - !Ref RadiusServerSG
+      IpAddressType: "ipv4"
+      Tags:
+        - Key: Purpose 
+          Value: LinOTP Portal
+        - Key: StackName
+          Value: !Ref AWS::StackName
+  ALBTargetGroupHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: "/selfservice/login"
+      Port: 443
+      Protocol: "HTTPS"
+      HealthCheckPort: "traffic-port"
+      HealthCheckProtocol: "HTTPS"
+      HealthCheckTimeoutSeconds: 5
+      UnhealthyThresholdCount: 2
+      TargetType: "instance"
+      Matcher: 
+          HttpCode: "200"
+      HealthyThresholdCount: 5
+      VpcId: !Ref VPCID
+      Name: "LinOTP-Portal-TargetGrp"
+      HealthCheckEnabled: true
+      TargetGroupAttributes: 
+        - 
+          Key: "stickiness.enabled"
+          Value: "false"
+        - 
+          Key: "deregistration_delay.timeout_seconds"
+          Value: "300"
+        - 
+          Key: "stickiness.type"
+          Value: "lb_cookie"
+        - 
+          Key: "stickiness.lb_cookie.duration_seconds"
+          Value: "86400"
+        - 
+          Key: "slow_start.duration_seconds"
+          Value: "0"
+        - 
+          Key: "load_balancing.algorithm.type"
+          Value: "round_robin"
+  ALBListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref 'LinOTPPortalALB'
+      Port: 80
+      Protocol: "HTTP"
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref 'ALBTargetGroupHTTPS'
+
+  RadiusServerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    DeletionPolicy: Delete
+    Properties: 
+      LaunchTemplateName: radius-server-launch-template
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt
+            - RadiusMFAInstanceProfileRole
+            - Arn
+        DisableApiTermination: false
+        KeyName: !Ref KeyName
+        BlockDeviceMappings: 
+          - Ebs:
+              VolumeSize: 8
+              VolumeType: gp2
+              DeleteOnTermination: true
+              Encrypted: true
+              KmsKeyId: !Ref EbsEncryptionKmsKeyId
+            DeviceName: /dev/xvdh
+        ImageId: !Ref LinuxLatestAMI
+        InstanceType: !Ref RADIUSServerInstanceType
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Ref RADIUSServerName
+              - Key: Stack
+                Value: LinOTP
+        SecurityGroupIds:
+          - !GetAtt RadiusServerSG.GroupId
+
+  RadiusServerAutoScalingGroup:
+    DependsOn: RADIUSEventBridgeResource
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub "RADIUS-SVR-${AWS::StackName}"
+      MinSize: "1"
+      MaxSize: "1"
+      DesiredCapacity: "1"
+      Cooldown: '300'
+      HealthCheckGracePeriod: 0
+      LaunchTemplate:
+        LaunchTemplateId: !Ref RadiusServerLaunchTemplate
+        Version: !GetAtt RadiusServerLaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet1ID
+        - !Ref PrivateSubnet2ID
+      TargetGroupARNs:
+        - !Ref 'ALBTargetGroupHTTPS'
+    CreationPolicy:
+      ResourceSignal:
+        Count: '1'
+        Timeout: PT15M
+  RADIUSEventBridgeResource:
+    Type: AWS::Events::Rule
+    Properties:
+      State: ENABLED
+      Description: Run SSM Automation document that configures LinOTP/FreeRADIUS on the RADIUS Server.
+      EventPattern:
+        source:
+          - aws.autoscaling
+        detail-type:
+          - EC2 Instance Launch Successful
+        detail:
+          AutoScalingGroupName:
+            - !Sub "RADIUS-SVR-${AWS::StackName}"
+      Targets:
+        - Arn: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${LinOTPConfigurationDoc}:$DEFAULT'
+          Id: RADIUS-Config
+          RoleArn: !GetAtt EventBridgeSSMAutoRole.Arn
+          InputTransformer:
+            InputPathsMap:
+              InstanceId: $.detail.EC2InstanceId
+              ASGName: $.detail.AutoScalingGroupName
+            InputTemplate: !Sub '{
+                                "AutomationAssumeRole":["${RADSVRRole.Arn}"],
+                                "InstanceId":[<InstanceId>],
+                                "ASGName":[<ASGName>],
+                                "PrivateSubnet1ID":["${PrivateSubnet1ID}"],
+                                "PrivateSubnet2ID":["${PrivateSubnet2ID}"],
+                                "RADIUSServerName":["${RADIUSServerName}"], 
+                                "VPCID":["${VPCID}"], 
+                                "StackName":["${AWS::StackName}"]
+                                 }'
+  RadiusServerSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP/HTTPS access on the RADIUS Server
+      VpcId: !Ref VPCID
+      Tags:
+        - Key: Name
+          Value: RADIUS Server SecurityGroup
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: udp
+          FromPort: 1812
+          ToPort: 1812
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+  
+  # Notification SNS Part
+  SNSMessagePublisher:
+    DependsOn:
+      - RadiusServerAutoScalingGroup
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SNSDeliveryLambda.Arn
+      WorkSpaceRegistrationCode: !ImportValue AWS-QuickStart-WorkSpace-RegistrationCode
+      WorkSpaceID: !ImportValue AWS-QuickStart-WorkSpaceID
+      WorkSpaceUsername: !ImportValue AWS-QuickStart-WorkSpace-Username
+      SNSTopicArn: !ImportValue 
+        'Fn::Sub': '${SNSStackStatusTopic}'
+      LinOTPPortal: !Sub 'https://${LinOTPPortalALB.DNSName}'
+  SNSDeliveryLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+     # FunctionName: 'WorkSpace-Launch-Status-Quickstart'
+      Handler: index.handler
+      Runtime: python3.8
+      Role: !ImportValue
+        'Fn::Sub': '${SNSDeliveryLambdaExecutionRole}'
+      Code:
+        ZipFile: |  
+          import boto3
+          import json
+          import cfnresponse
+          import logging
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          client = boto3.client('sns')
+          def handler(event, context):
+            try:
+              if event['RequestType'] == 'Delete':
+                logger.info("Processing Delete event - " + json.dumps(event))
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+              elif event['RequestType'] == 'Update':
+                logger.info("Processing UPDATE event - " + json.dumps(event))
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+              else:
+                logger.info("Processing CREATE event - " + json.dumps(event))
+                subject = 'Amazon WorkSpaces QuickStart Success Status'
+                workspace_reg_code = event['ResourceProperties']['WorkSpaceRegistrationCode']
+                workspace_id = event['ResourceProperties']['WorkSpaceID']
+                workspace_username = event['ResourceProperties']['WorkSpaceUsername']
+                lin_otp_portal = event['ResourceProperties']['LinOTPPortal']
+                msg = """
+                  Dear Amazon WorkSpace User,
+                      
+                  Thank you for deploying {solution_name}.
+                    
+                  This is to confirm that MFA-enabled WorkSpace has been successfully provisioned for you and is ready to use.
+
+                  Your WorkSpace Registration Code is: {reg_code}
+
+                  Your WorkSpace ID is: {id}
+
+                  Your Username is: {wsusername} 
+                  
+                  Your Password can be accessed in AWS Secrets Manager.
+
+                  The Portal where you need to perform MFA token registration can be accessed via: {linotpportal}. 
+                  You will be required to login with your username and password. 
+
+                  You can download Amazon WorkSpaces client from: https://clients.amazonworkspaces.com/.
+
+                  Should face any issue or require further assistance, please to reach out to your IT Admin.
+
+                  Thank you.
+
+                    """.format(solution_name = 'Amazon WorkSpaces with MFA via Quickstart',reg_code = workspace_reg_code, id = workspace_id, wsusername = workspace_username, linotpportal = lin_otp_portal)
+                topic_arn = event['ResourceProperties']['SNSTopicArn']
+                message_id = client.publish(TopicArn = topic_arn, Message = msg, Subject = subject)
+                if message_id:
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, message_id)
+                  return message_id
+                else:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, message_id)   
+            except Exception as e:
+              print(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failure'})
+              return {'statusCode': 500, 'body': json.dumps(e.__repr__())}
+  SNSDeliveryLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: cloudformation.amazonaws.com
+      FunctionName: !GetAtt SNSDeliveryLambda.Arn
+      SourceArn: !Sub ${AWS::StackId}
+      SourceAccount: !Sub ${AWS::AccountId}
+Outputs:
+  RADIUSSharedSecret:
+    Description: Shared Secret ARN for RADIUS Server.
+    Value: !Ref 'RADIUSSharedSecret'
+  LinOTPAdminPortal:
+    Description: ELB DNS name to connect to LinOTP Portal for Admin management.
+    Value: !Sub https://${LinOTPPortalALB.DNSName}/manage
+  LinOTPUserPortal:
+    Description: ELB DNS name to connect to LinOTP Portal for Users' MFA registration.
+    Value: !GetAtt 'LinOTPPortalALB.DNSName'

@@ -1,0 +1,2189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform:
+  - WorkSpaceDefaultRoleMacro
+Description: >-
+  This template creates a domain user and provisions an Amazon WorkSpace for that user. 
+  **WARNING** This template creates Amazon WorkSpace, SSM automation, Lambda function, and related resources. You'll be billed for the AWS resources used if you
+  create a stack from this template. (qs-1t9sl8r2t)
+Metadata:
+  QuickStartDocumentation:
+    EntrypointName: 'Parameters for provisioning WorkSpace in AD Connector Directory Service'
+    Order: '2'
+  cfn-lint:
+    config:
+      ignore_checks:
+        - E9101
+        - W9006
+        - W9002
+        - W9003
+        - W3037
+        - E2507
+        - W2511
+      ignore_reason:
+        - "Execution part SSM Automation"
+        - "IAM resources policy permissions"
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Microsoft AD DS configuration
+        Parameters:
+          - DomainUser
+          - FirstName
+          - LastName
+          - ADServer1PrivateIP
+          - ADServer2PrivateIP
+          - DomainDNSName
+      - Label:
+          default: WorkSpaces and WorkSpaces directory configuration
+        Parameters:
+          - EnableSelfService
+          - EnableWorkDocs
+          - Tenancy
+          - BundleId
+          - ComputeTypeName
+          - RunningMode
+          - UserVolumeEncryptionEnabled
+          - RootVolumeEncryptionEnabled
+          - VolumeEncryptionKey
+          - UserVolumeSizeGib
+          - RootVolumeSizeGib
+          - DC2InstanceId
+          - DC1InstanceId
+      - Label:
+          default: VPC configuration
+        Parameters:
+          - VPCID 
+          - PrivateSubnet1ID
+          - PrivateSubnet2ID
+          - ADServer1NetBIOSName
+          - ADServer2NetBIOSName
+    ParameterLabels:
+      DomainUser:
+        default: Normal domain user to launch WorkSpace
+      FirstName:
+        default: WorkSpace user first name
+      LastName:
+        default: WorkSpace user last name
+      EnableSelfService:
+        default: Enable self-service on WorkSpace directory
+      EnableWorkDocs:
+        default: Enable WorkDocs on WorkSpace directory
+      Tenancy:
+        default: WorkSpaces VPC tenancy
+      BundleId:
+        default: Enter WorkSpace bundle ID
+      ComputeTypeName:
+        default: 'Workspaces compute type'
+      RunningMode:
+        default: WorkSpaces running mode
+      UserVolumeEncryptionEnabled:
+        default: Encrypt WorkSpace user volume
+      RootVolumeEncryptionEnabled:
+        default: Encrypt WorkSpace user volume
+      VolumeEncryptionKey:
+        default: Enter WorkSpace KMS key to encrypt volumes 
+      UserVolumeSizeGib:
+        default: Size of user volume WorkSpace storage
+      RootVolumeSizeGib:
+        default: Size of root volume WorkSpace storage
+      DC1InstanceId:
+        default: Instance ID of Domain Controller 1
+      DC2InstanceId:
+        default: Instance ID of Domain Controller 2
+      DomainControllersSGID:
+        default: Domain Controlelrs SG ID
+      DomainDNSName:
+        default: Domain DNS name
+      ADServer1PrivateIP:
+        default: Domain Controller 1 private IP address
+      ADServer2PrivateIP:
+        default: Domain Controller 2 private IP address
+      PrivateSubnet1ID:
+        default: Private subnet 1 ID
+      PrivateSubnet2ID:
+        default: Private subnet 2 ID
+      
+      PrivateSubnet1CIDR:
+        default: Private subnet 1 CIDR 
+      PrivateSubnet2CIDR: 
+        default: Private subnet 2 CIDR 
+      PrivateSubnet3CIDR: 
+        default: Private subnet 3 CIDR 
+      PublicSubnet1CIDR: 
+        default: Public subnet 1 CIDR 
+      PublicSubnet2CIDR: 
+        default: Private subnet 2 CIDR 
+      PublicSubnet3CIDR: 
+        default: Private subnet 3 CIDR 
+Parameters:
+  ADServer1PrivateIP:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$
+    Default: 172.31.16.20
+    Description: Fixed private IP for first AD Domain Controller located in Availability Zone 1.
+    Type: String
+  ADServer2PrivateIP:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$
+    Default: 172.31.32.10
+    Description: Fixed private IP for second AD Domain Controller located in Availability Zone 2.
+    Type: String
+  DomainDNSName:
+    AllowedPattern: '[a-zA-Z0-9\-]+\..+'
+    Default: demo.com
+    Description: Fully qualified domain name (FQDN) of forest root domain (example-demo.com).
+    MaxLength: '255'
+    MinLength: '2'
+    Type: String
+  DomainUser:
+    AllowedPattern: '[a-zA-Z0-9]*'
+    Default: JaneDoe
+    Description: User name for AD account for launching WorkSpace.
+    MaxLength: '25'
+    MinLength: '5'
+    Type: String
+  FirstName:
+    AllowedPattern: '[a-zA-Z0-9]*'
+    Default: Jane
+    Description: First name of domain user account for launching WorkSpace.
+    MaxLength: '25'
+    MinLength: '2'
+    Type: String
+  LastName:
+    AllowedPattern: '[a-zA-Z0-9]*'
+    Default: Doe
+    Description: Last name of domain user account for launching WorkSpace.
+    MaxLength: '25'
+    MinLength: '2'
+    Type: String
+  EnableWorkDocs:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: WorkDocs is enabled or disabled. If enabled and WorkDocs isn't available in the region, you'll receive an OperationNotSupportedException error. Set EnableWorkDocs to disabled and try again.
+    Type: String
+  EnableSelfService:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Self-service capabilities are enabled or disabled.
+    Type: String
+  Tenancy:
+    AllowedValues:
+      - 'DEDICATED'
+      - 'SHARED'
+    Default: 'SHARED'
+    Description: WorkSpace directory is dedicated or shared. To use Bring Your Own License (BYOL) images, set this value to DEDICATED and enable your AWS account for BYOL. If your account hasn't been enabled for BYOL, you'll receive an InvalidParameterValuesException error.
+    Type: String
+  RootVolumeEncryptionEnabled:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: Data stored on root volume is encrypted.
+    Type: String
+  UserVolumeEncryptionEnabled:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: Data stored on user volume is encrypted.
+    Type: String
+  VolumeEncryptionKey:
+    Type: String
+    Default: 'default'
+    Description: Symmetric AWS KMS key used to encrypt data stored on your WorkSpace. WorkSpaces doesn't support asymmetric KMS keys. Specify KMS Key ID.
+  RootVolumeSizeGib:
+    Default: '80'
+    Description: Size of user storage. Refer to Modify Volume Sizes - https://docs.aws.amazon.com/workspaces/latest/adminguide/modify-workspaces.html#change_volume_sizes.
+    Type: Number
+  UserVolumeSizeGib:
+    Default: '50'
+    Description: Size of user storage. Refer to Modify Volume Sizes - https://docs.aws.amazon.com/workspaces/latest/adminguide/modify-workspaces.html#change_volume_sizes
+    Type: Number
+  BundleId:
+    Default: 'wsb-gm4d5tx2v'
+    AllowedPattern: '^wsb-[0-9a-z]{8,63}$'
+    Description: Identifier of bundle for WorkSpace. Use DescribeWorkspaceBundles to list available bundles.
+    Type: String
+  ComputeTypeName:
+    Default: 'PERFORMANCE'
+    AllowedValues:
+      - VALUE
+      - STANDARD
+      - POWERPRO
+      - POWER
+      - PERFORMANCE
+      - GRAPHICSPRO
+      - GRAPHICS
+    Description: Compute type. Valid values are VALUE | STANDARD | PERFORMANCE | POWER | GRAPHICS | POWERPRO | GRAPHICSPRO. Ensure bundle ID supports compute type selected. 
+    Type: String
+  RunningMode:
+    Default: 'AUTO_STOP'
+    AllowedValues:
+      - ALWAYS_ON
+      - AUTO_STOP
+    Description: Choose Workspaces running mode.
+    Type: String
+  ## SNS 
+  SNSDeliveryLambdaExecutionRoleExportName:
+    Description: Export name for execution role for SNS publisher Lambda. 
+    Type: String
+    Default: ''
+  SNSStackStatusTopicExportName:
+    Description: Export name of topic subscribed by user earlier and exported by parent stack.
+    Type: String
+    Default: ''
+  SNSDeliveryLambdaExecutionRoleExportValue:
+    Description: Execution role for SNS publisher Lambda. 
+    Type: String
+    Default: ''
+  SNSStackStatusTopicExportValue:
+    Description: Topic subscribed by user earlier and exported by parent stack.
+    Type: String
+    Default: ''
+  VPCID:
+    Default: ''
+    Description: ID of VPC into which the stack is deployed.
+    Type: 'String'
+  PrivateSubnet1ID:
+    Description: Choose ID of private subnet 1 in Availability Zone 1 (example-subnet-a0246dcd).
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnet2ID:
+    Description: Choose ID of private subnet 2 in Availability Zone 2 (example-subnet-a0246dcd).
+    Type: AWS::EC2::Subnet::Id
+  ADServer1NetBIOSName:
+    AllowedPattern: '[a-zA-Z0-9\-]+'
+    Default: DC1-ADC
+    Description: NetBIOS name of first AD Domain Controller (maximum is 15 characters).
+    MaxLength: '15'
+    MinLength: '1'
+    Type: String
+  ADServer2NetBIOSName:
+    AllowedPattern: '[a-zA-Z0-9\-]+'
+    Default: DC2-ADC
+    Description: NetBIOS name of second AD Domain Controller (maximum is 15 characters).
+    MaxLength: '15'
+    MinLength: '1'
+    Type: String
+  ADAltUserSecParamName:
+    Default: 'ADAltUser'
+    Description: AD Alternate user.
+    Type: String
+  DC1InstanceId:
+    Default: 'DC1-ID'
+    Description: Instance ID for Domain Controller 1. Required to set up WorkSpace.
+    Type: String
+  DC2InstanceId:
+    Default: 'DC2-ID'
+    Description: Instance ID for Domain Controller 2. Required to set up WorkSpace.
+    Type: String
+  DomainControllersSGID:
+    Default: 'DCControllerSG'
+    Description: Domain Controllers Security Group ID.
+    Type: AWS::EC2::SecurityGroup::Id
+  PrivateSubnet1CIDR:
+    Default: ''
+    Description: Private Subnet 1 CIDR.
+    Type: String
+  PrivateSubnet2CIDR:
+    Default: ''
+    Description: Private Subnet 2 CIDR.
+    Type: String
+  PrivateSubnet3CIDR:
+    Default: ''
+    Description: Private Subnet 3 CIDR.
+    Type: String
+  PublicSubnet1CIDR:
+    Default: ''
+    Description: Public Subnet 1 CIDR.
+    Type: String
+  PublicSubnet2CIDR:
+    Default: ''
+    Description: Public Subnet 2 CIDR.
+    Type: String
+  PublicSubnet3CIDR:
+    Default: ''
+    Description: Public Subnet 3 CIDR.
+    Type: String
+  QSS3BucketName:
+    AllowedPattern: ^[0-9a-z]+([0-9a-z-\.]*[0-9a-z])*$
+    ConstraintDescription: >-
+      The S3 bucket name can include numbers, lowercase letters, 
+      and hyphens (-), but it cannot start or end with a hyphen.
+    Default: 'aws-quickstart'
+    Description: >-
+      Name of the S3 bucket for your copy of the deployment assets. Keep the default
+      name unless you are customizing the template. Changing the name updates code 
+      references to point to a new location.
+    MinLength: 3
+    MaxLength: 63
+    Type: 'String'
+  QSS3KeyPrefix:
+    AllowedPattern: ^([0-9a-zA-Z!-_\.\*'\(\)/]+/)*$
+    ConstraintDescription: >-
+      The S3 key prefix can include numbers, lowercase letters, uppercase letters, 
+      hyphens (-), underscores (_), periods (.), asterisks (*), single quotes ('),
+      open parenthesis ((), close parenthesis ()), and forward slashes (/). End the
+      prefix with a forward slash.
+    Default: quickstart-freeradius-mfa-workspaces/
+    Description: >-
+      S3 key prefix that is used to simulate a folder for your copy of the 
+      deployment assets. Keep the default prefix unless you are customizing 
+      the template. Changing the prefix updates code references to point to 
+      a new location.
+    Type: 'String'
+  
+Conditions:
+  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-quickstart']
+  CheckForThirdPrivateAZ: !Equals [!Ref PrivateSubnet3CIDR, ""]
+  CheckForThirdPublicAZ: !Equals [!Ref PublicSubnet3CIDR, ""]
+  WorkspaceVolumeEncryptionCheck: !Or [!Equals [!Ref UserVolumeEncryptionEnabled, "true"], !Equals [!Ref RootVolumeEncryptionEnabled, "true"]]
+  
+Resources:
+  DirectoryServiceWorkSpaceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group to register AD Connector and WorkSpace.
+      GroupName: Security Group to register AD Connector and WorkSpace
+      VpcId: !Ref VPCID
+      Tags:
+        - Key: Name
+          Value: ADConnector WorkSpaces SecurityGroup
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          Description: DNS
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: tcp
+          Description: DNS
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: DNS
+            FromPort: 53
+            ToPort: 53
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: tcp
+          Description: DNS
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: tcp
+          Description: DNS
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: DNS
+            FromPort: 53
+            ToPort: 53
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: udp
+          Description: DNS
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: udp
+          Description: DNS
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: DNS
+            FromPort: 53
+            ToPort: 53
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: udp
+          Description: DNS
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: udp
+          Description: DNS
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: DNS
+            FromPort: 53
+            ToPort: 53
+            CidrIp: !Ref PublicSubnet3CIDR          
+        - IpProtocol: tcp
+          Description: Kerberos
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: tcp
+          Description: Kerberos
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: Kerberos
+            FromPort: 88
+            ToPort: 88
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: tcp
+          Description: Kerberos
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: tcp
+          Description: Kerberos
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: Kerberos
+            FromPort: 88
+            ToPort: 88
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: udp
+          Description: Kerberos
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: udp
+          Description: Kerberos
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: Kerberos
+            FromPort: 88
+            ToPort: 88
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: udp
+          Description: Kerberos
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: udp
+          Description: Kerberos
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: Kerberos
+            FromPort: 88
+            ToPort: 88
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: tcp
+          Description: LDAP
+          FromPort: 389
+          ToPort: 389
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: tcp
+          Description: LDAP
+          FromPort: 389
+          ToPort: 389
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: LDAP
+            FromPort: 389
+            ToPort: 389
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: tcp
+          Description: LDAP
+          FromPort: 389
+          ToPort: 389
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: tcp
+          Description: LDAP
+          FromPort: 389
+          ToPort: 389
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: LDAP
+            FromPort: 389
+            ToPort: 389
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: udp
+          Description: LDAP
+          FromPort: 389
+          ToPort: 389
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: udp
+          Description: LDAP
+          FromPort: 389
+          ToPort: 389
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: LDAP
+            FromPort: 389
+            ToPort: 389
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: udp
+          Description: LDAP
+          FromPort: 389
+          ToPort: 389
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: udp
+          Description: LDAP
+          FromPort: 389
+          ToPort: 389
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: LDAP
+            FromPort: 389
+            ToPort: 389
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: tcp
+          Description: NETLOGON
+          FromPort: 135
+          ToPort: 139
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: tcp
+          Description: NETLOGON
+          FromPort: 135
+          ToPort: 139
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: NETLOGON
+            FromPort: 135
+            ToPort: 139
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: tcp
+          Description: NETLOGON
+          FromPort: 135
+          ToPort: 139
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: tcp
+          Description: NETLOGON
+          FromPort: 135
+          ToPort: 139
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: NETLOGON
+            FromPort: 135
+            ToPort: 139
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: udp
+          Description: NETLOGON
+          FromPort: 135
+          ToPort: 138
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: udp
+          Description: NETLOGON
+          FromPort: 135
+          ToPort: 138
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: NETLOGON
+            FromPort: 135
+            ToPort: 138
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: udp
+          Description: NETLOGON
+          FromPort: 135
+          ToPort: 138
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: udp
+          Description: NETLOGON
+          FromPort: 135
+          ToPort: 138
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: NETLOGON
+            FromPort: 135
+            ToPort: 138
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: udp
+          Description: NTP
+          FromPort: 123
+          ToPort: 123
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: udp
+          Description: NTP
+          FromPort: 123
+          ToPort: 123
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: NTP
+            FromPort: 123
+            ToPort: 123
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: udp
+          Description: NTP
+          FromPort: 123
+          ToPort: 123
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: udp
+          Description: NTP
+          FromPort: 123
+          ToPort: 123
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: NTP
+            FromPort: 123
+            ToPort: 123
+            CidrIp: !Ref PublicSubnet3CIDR    
+        - IpProtocol: tcp
+          Description: SMB
+          FromPort: 445
+          ToPort: 445
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: tcp
+          Description: SMB
+          FromPort: 445
+          ToPort: 445
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: SMB
+            FromPort: 445
+            ToPort: 445
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: tcp
+          Description: SMB
+          FromPort: 445
+          ToPort: 445
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: tcp
+          Description: SMB
+          FromPort: 445
+          ToPort: 445
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: SMB
+            FromPort: 445
+            ToPort: 445
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: udp
+          Description: SMB
+          FromPort: 445
+          ToPort: 445
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: udp
+          Description: SMB
+          FromPort: 445
+          ToPort: 445
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: SMB
+            FromPort: 445
+            ToPort: 445
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: udp
+          Description: SMB
+          FromPort: 445
+          ToPort: 445
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: udp
+          Description: SMB
+          FromPort: 445
+          ToPort: 445
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: SMB
+            FromPort: 445
+            ToPort: 445
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: tcp
+          Description: Kerberos Set & Change Password
+          FromPort: 464
+          ToPort: 464
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: tcp
+          Description: Kerberos Set & Change Password
+          FromPort: 464
+          ToPort: 464
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: Kerberos Set & Change Password
+            FromPort: 464
+            ToPort: 464
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: tcp
+          Description: Kerberos Set & Change Password
+          FromPort: 464
+          ToPort: 464
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: tcp
+          Description: Kerberos Set & Change Password
+          FromPort: 464
+          ToPort: 464
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: Kerberos Set & Change Password
+            FromPort: 464
+            ToPort: 464
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: udp
+          Description: Kerberos Set & Change Password
+          FromPort: 464
+          ToPort: 464
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: udp
+          Description: Kerberos Set & Change Password
+          FromPort: 464
+          ToPort: 464
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: Kerberos Set & Change Password
+            FromPort: 464
+            ToPort: 464
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: udp
+          Description: Kerberos Set & Change Password
+          FromPort: 464
+          ToPort: 464
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: udp
+          Description: Kerberos Set & Change Password
+          FromPort: 464
+          ToPort: 464
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: Kerberos Set & Change Password
+            FromPort: 464
+            ToPort: 464
+            CidrIp: !Ref PublicSubnet3CIDR      
+        - IpProtocol: udp
+          Description: RADIUS - MFA
+          FromPort: 1812
+          ToPort: 1813
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: udp
+          Description: RADIUS - MFA
+          FromPort: 1812
+          ToPort: 1813
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: RADIUS - MFA
+            FromPort: 1812
+            ToPort: 1813
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: udp
+          Description: RADIUS - MFA
+          FromPort: 1812
+          ToPort: 1813
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: udp
+          Description: RADIUS - MFA
+          FromPort: 1812
+          ToPort: 1813
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: udp
+            Description: RADIUS - MFA
+            FromPort: 1812
+            ToPort: 1813
+            CidrIp: !Ref PublicSubnet3CIDR
+        - IpProtocol: tcp
+          Description: Dynamic ports for RPC
+          FromPort: 49152
+          ToPort: 65535
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: tcp
+          Description: Dynamic ports for RPC
+          FromPort: 49152
+          ToPort: 65535
+          CidrIp: !Ref PrivateSubnet2CIDR
+        - !If 
+          - CheckForThirdPrivateAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: Dynamic ports for RPC
+            FromPort: 49152
+            ToPort: 65535
+            CidrIp: !Ref PrivateSubnet3CIDR
+        - IpProtocol: tcp
+          Description: Dynamic ports for RPC
+          FromPort: 49152
+          ToPort: 65535
+          CidrIp: !Ref PublicSubnet1CIDR
+        - IpProtocol: tcp
+          Description: Dynamic ports for RPC
+          FromPort: 49152
+          ToPort: 65535
+          CidrIp: !Ref PublicSubnet2CIDR
+        - !If 
+          - CheckForThirdPublicAZ
+          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            Description: Dynamic ports for RPC
+            FromPort: 49152
+            ToPort: 65535
+            CidrIp: !Ref PublicSubnet3CIDR
+
+  DomainUserSecrets:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: DomainUserSecret
+      Description: "Password for WorkSpace domain user."
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DomainUser}"}'
+        GenerateStringKey: "password"
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'
+  
+  WSDirectoryId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: Directory ID for AD Connector created by SSM automation.
+      Name: WSDirectoryId
+      Type: String
+      Value: 'd-xxxxxxxxx'
+
+  DomainUserBindDN:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: BindDN of domain user. Used for LinOTP LDAP connection. 
+      Name: /LinOTP/Config/AD/BindDN
+      Type: String
+      Value: 'CN=xxx,OU=xxxx,DC=xxx,DC=xxx'
+
+  DomainUserBaseDN:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: BaseDN of domain user. Used for LinOTP LDAP connection. 
+      Name: /LinOTP/Config/AD/BaseDN
+      Type: String
+      Value: 'OU=xxxx,DC=xxx,DC=xxx'
+
+  DNSServers:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: AD DNS Servers used for LinOTP LDAP connection. 
+      Name: /LinOTP/Config/AD/DNSServers
+      Type: String
+      Value: '1.1.1.1'
+  
+  
+  AWSQuickStartADConnector:
+    DependsOn: 
+      - WSDirectoryId
+      - DomainUserBindDN
+      - DomainUserBaseDN
+      - DNSServers
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Tags:
+        - Key: StackName
+          Value: !Ref AWS::StackName
+      Content:
+        schemaVersion: '0.3'
+        description: 'Create a WorkSpace user in AD, launch AD Connector, and register it for WorkSpaces.'
+        assumeRole: '{{AutomationAssumeRole}}'
+        parameters:
+          ADAltUserSecParamName:
+            description: 'ARN for AD alt user.'
+            type: 'String'
+            default: 'AD-Alt-Secret'
+          AutomationAssumeRole:
+            type: String
+            description: "The ARN of role for automation to perform actions such as create AD Connector DS."
+          DomainUser:
+            description: 'Domain user.'
+            type: 'String'
+            default: 'TestUser'
+          FirstName:
+            description: 'First name.'
+            type: 'String'
+            default: 'XYZ'
+          LastName:
+            description: 'Last name.'
+            type: 'String'
+            default: 'ABC'
+          VPCID:
+            default: 'vpc-002a04012a88b2930'
+            description: 'CIDR Block for VPC.'
+            type: 'String'
+          PrivateSubnet1ID:
+            default: 'subnet-07ab7d45753ca65f7'
+            description: 'Private Subnet ID-1 for AD Connector Directory Service.'
+            type: 'String'
+          PrivateSubnet2ID:
+            default: 'subnet-0caf0628b63de324e'
+            description: 'Private Subnet ID-2 for AD Connector Directory Service.'
+            type: 'String'
+          ADServer1PrivateIP:
+            default: '10.0.1.10'
+            description: 'Fixed private IP for first AD Domain Controller located in Availability Zone 1.'
+            type: 'String'
+          ADServer2PrivateIP:
+            default: '10.0.2.10'
+            description: 'Fixed private IP for second AD Domain Controller located in Availability Zone 2.'
+            type: 'String'
+          DomainDNSName:
+            default: 'example.com'
+            description: 'Fully qualified domain name (FQDN) of forest root domain (example-demo.com).'
+            type: 'String'
+          DomainUserSecParamName:
+            description: 'AWS Secrets Parameter name that has user name and password for test user used to launch WorkSpace.'
+            type: 'String'
+          ADServer1NetBIOSName:
+            default: 'DC1'
+            description: 'NetBIOS name of first AD Domain Controller (maximum is 15 characters).'
+            type: 'String'
+          ADServer2NetBIOSName:
+            default: 'DC2'
+            description: 'NetBIOS name of second AD Domain Controller (maximum of 15 characters).'
+            type: 'String'
+          EnableWorkDocs:
+            default: true
+            description: 
+              'Enable WorkDocs on WorkSpace directory.'
+            type: 'Boolean'
+          EnableSelfService:
+            default: true
+            description: 
+              'Enable self-service on WorkSpace directory.'
+            type: 'Boolean'
+          Tenancy:
+            default: 'SHARED'
+            description:
+              'WorkSpace directory is dedicated or shared. To use Bring Your Own License (BYOL) images, this value must be set to DEDICATED and your AWS account must be enabled for BYOL.'
+            type: 'String'
+          StackName:
+            default: ''
+            description: 'Stack name input for cfn resource signal.'
+            type: 'String'
+          DomainControllersSGID:
+            default: ''
+            description: 'Domain Controller Security Group.'
+            type: 'String'
+          DSWorkspaceSGID:
+            default: ''
+            description: 'Security Group for AD Connector.'
+            type: 'String'
+        mainSteps:
+        - name: 'dc1InstanceId'
+          action: aws:executeAwsApi
+          onFailure: 'step:signalfailure'
+          nextStep: 'dc2InstanceId'
+          inputs:
+            Service: ec2
+            Api: DescribeInstances
+            Filters:
+              - Name: 'tag:Name'
+                Values: ['{{ADServer1NetBIOSName}}']
+              - Name: 'instance-state-name'
+                Values: ['running']
+          outputs:
+            - Name: InstanceId
+              Selector: '$.Reservations[0].Instances[0].InstanceId'
+              Type: 'String'
+        
+        - name: 'dc2InstanceId'
+          action: aws:executeAwsApi
+          onFailure: 'step:signalfailure'
+          nextStep: 'LambdaUpdateADRole'
+          inputs:
+            Service: ec2
+            Api: DescribeInstances
+            Filters:
+              - Name: 'tag:Name'
+                Values: ['{{ADServer2NetBIOSName}}']
+              - Name: 'instance-state-name'
+                Values: ['running']
+          outputs:
+            - Name: InstanceId
+              Selector: '$.Reservations[0].Instances[0].InstanceId'
+              Type: 'String'
+            - Name: InstanceProfile
+              Selector: '$.Reservations[0].Instances[0].IamInstanceProfile.Arn'
+              Type: 'String'
+        
+        - name: 'LambdaUpdateADRole'
+          action: 'aws:executeScript'
+          onFailure: 'step:signalfailure'
+          nextStep: 'AttachSecurityGroupsDC2'
+          inputs:
+            Runtime: python3.8
+            InputPayload:
+              InstanceProfile: '{{dc2InstanceId.InstanceProfile}}'
+            Handler: script_handler
+            Script: |-
+                import boto3
+                import json
+                import base64
+                from botocore.exceptions import ClientError
+                iam_client = boto3.client(service_name="iam")
+                def script_handler(events, context):
+                  instance_profile_arn = events['InstanceProfile']
+                  instance_profile_split_array = instance_profile_arn.split('/')
+                  instance_profile_name = instance_profile_split_array[1]
+                  Instance_profile_object = iam_client.get_instance_profile(InstanceProfileName=instance_profile_name)
+                  roles_list = Instance_profile_object['InstanceProfile']['Roles']
+                  role_name = ""
+                  for role in roles_list:
+                    role_name = role['RoleName']
+                  print(role_name)
+                  response = iam_client.put_role_policy(RoleName=role_name,PolicyName='Domain-User-Secret-Policy',PolicyDocument='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["secretsmanager:GetSecretValue","secretsmanager:DescribeSecret"],"Resource":"*"},{"Effect":"Allow","Action":"ssm:PutParameter","Resource":["arn:aws:ssm:*:*:parameter/LinOTP/Config/AD/BaseDN","arn:aws:ssm:*:*:parameter/LinOTP/Config/AD/BindDN","arn:aws:ssm:*:*:parameter/LinOTP/Config/AD/DNSServers"]}]}')
+                  return response
+        
+        - name: AttachSecurityGroupsDC2
+          action: 'aws:executeAwsApi'
+          onFailure: 'step:signalfailure'
+          nextStep: 'AttachSecurityGroupsDC1'
+          inputs:
+            Service: ec2
+            Api: ModifyInstanceAttribute
+            Groups:
+             - '{{DSWorkspaceSGID}}'
+             - '{{DomainControllersSGID}}'
+            InstanceId: '{{dc2InstanceId.InstanceId}}'
+        
+        - name: AttachSecurityGroupsDC1
+          action: 'aws:executeAwsApi'
+          onFailure: 'step:signalfailure'
+          nextStep: 'CreateWorkSpaceUser'
+          inputs:
+            Service: ec2
+            Api: ModifyInstanceAttribute
+            Groups:
+             - '{{DSWorkspaceSGID}}'
+             - '{{DomainControllersSGID}}'
+            InstanceId: '{{dc1InstanceId.InstanceId}}'
+
+        - name: 'CreateWorkSpaceUser'
+          action: 'aws:runCommand'
+          onFailure: 'step:signalfailure'
+          nextStep: 'LambdaCreateADC'
+          inputs:
+            DocumentName: 'AWS-RunPowerShellScript'
+            InstanceIds:
+              - '{{dc2InstanceId.InstanceId}}'
+            CloudWatchOutputConfig:
+              CloudWatchOutputEnabled: 'true'
+              CloudWatchLogGroupName: !Sub '/aws/QuickStart/SC1/WorkSpaces/${AWS::StackName}'
+            Parameters:
+              commands:
+                - |
+                  $username = '{{DomainUser}}'
+                    $firstname = '{{FirstName}}'
+                    $lastname = '{{LastName}}'
+                    $adname = $firstname + " " + $lastname
+                    $ADServer1PrivateIP = '{{ADServer1PrivateIP}}'
+                    $ADServer2PrivateIP = '{{ADServer2PrivateIP}}'
+                    $RetrievefromASM = ((Get-SECSecretValue -SecretId '{{DomainUserSecParamName}}').SecretString | ConvertFrom-Json).Password | ConvertTo-SecureString -asPlainText -Force
+                    $domainname = "@"+ (Get-ADDomain).Dnsroot
+                    $upn = $username + $domainname
+                    $path =  (get-ADDomain).UsersContainer
+                    New-ADUser -Name $adname -GivenName $firstname -Surname $lastname -SamAccountName $username -DisplayName $adname -Path $path -UserPrincipalName $upn -AccountPassword $RetrievefromASM -Enabled $true
+        #Create AD Connector with ExecuteScript
+        - name: 'LambdaCreateADC'
+          action: 'aws:executeScript'
+          onFailure: 'step:signalfailure'
+          nextStep: 'WaitforADConnector_to_be_Active'
+          inputs:
+            Runtime: python3.8
+            InputPayload:
+              DomainUserSecret: '{{ADAltUserSecParamName}}'
+              DomainName: '{{DomainDNSName}}'
+              VPC: '{{VPCID}}'
+              PrivateSubnet1ID: '{{PrivateSubnet1ID}}'
+              PrivateSubnet2ID: '{{PrivateSubnet2ID}}'
+              ADServer1PrivateIP: '{{ADServer1PrivateIP}}'
+              ADServer2PrivateIP: '{{ADServer2PrivateIP}}'
+            Handler: script_handler
+            Script: |-
+                import boto3
+                import json
+                import base64
+                from botocore.exceptions import ClientError
+                secretsmanager_client = boto3.client(service_name="secretsmanager")
+                directoryservices_client = boto3.client(service_name="ds")
+                def get_secret(secret_name=None):
+                    secret_data = secretsmanager_client.get_secret_value(SecretId=secret_name)
+                    try:
+                      get_secret_value_response = secretsmanager_client.get_secret_value(SecretId=secret_name)
+                    except ClientError as e:
+                        if e.response['Error']['Code'] == 'DecryptionFailureException':
+                            # Secrets Manager can't decrypt the protected secret text using the provided KMS key.
+                            # Deal with the exception here, and/or rethrow at your discretion.
+                            raise e
+                        elif e.response['Error']['Code'] == 'InternalServiceErrorException':
+                            # An error occurred on the server side.
+                            # Deal with the exception here, and/or rethrow at your discretion.
+                            raise e
+                        elif e.response['Error']['Code'] == 'InvalidParameterException':
+                            # You provided an invalid value for a parameter.
+                            # Deal with the exception here, and/or rethrow at your discretion.
+                            raise e
+                        elif e.response['Error']['Code'] == 'InvalidRequestException':
+                            # You provided a parameter value that is not valid for the current state of the resource.
+                            # Deal with the exception here, and/or rethrow at your discretion.
+                            raise e
+                        elif e.response['Error']['Code'] == 'ResourceNotFoundException':
+                            # We can't find the resource that you asked for.
+                            # Deal with the exception here, and/or rethrow at your discretion.
+                            raise e
+                    else:
+                      if 'SecretString' in secret_data:
+                            secret = json.loads(get_secret_value_response['SecretString'])
+                      else:
+                            secret = json.loads(base64.b64decode(get_secret_value_response['SecretBinary']))
+                      return secret
+                      ad_password = secret["Key"]
+                def create_adconnector(DomainName=None, VPCID=None, PrivateSubnet1ID=None, PrivateSubnet2ID=None, ADServer1PrivateIP=None, ADServer2PrivateIP=None, DomainUserSecret=None):
+                    active_directory_credentials = get_secret(secret_name=DomainUserSecret)
+                    
+                    adconnector_data = directoryservices_client.connect_directory(
+                        Name=DomainName,
+                        Password=active_directory_credentials["password"],
+                        Size='Small',
+                        ConnectSettings={
+                            'VpcId': VPCID,
+                            'SubnetIds': [
+                                PrivateSubnet1ID,
+                                PrivateSubnet2ID
+                            ],
+                            'CustomerDnsIps': [
+                                ADServer2PrivateIP,
+                                ADServer1PrivateIP
+                            ],
+                            'CustomerUserName': active_directory_credentials["username"]
+                        }
+                    )
+                    return adconnector_data
+                def script_handler(events, context):
+                  secret = events['DomainUserSecret']
+                  domain_name = events['DomainName']
+                  vpc = events['VPC']
+                  PrivateSubnet1ID = events['PrivateSubnet1ID']
+                  PrivateSubnet2ID = events['PrivateSubnet2ID']
+                  ADServer1PrivateIP = events['ADServer1PrivateIP']
+                  ADServer2PrivateIP = events['ADServer2PrivateIP']
+                  return create_adconnector(
+                            DomainName=domain_name,
+                            VPCID=vpc,
+                            PrivateSubnet1ID=PrivateSubnet1ID,
+                            PrivateSubnet2ID=PrivateSubnet2ID,
+                            ADServer1PrivateIP=ADServer1PrivateIP,
+                            ADServer2PrivateIP=ADServer2PrivateIP,
+                            DomainUserSecret=secret
+                        )
+          outputs:
+            - Name: DirectoryID
+              Selector: $.Payload.DirectoryId
+              Type: String
+
+        # Wait for AD Connector to be Active before registering for WorkSpaces
+        - name: WaitforADConnector_to_be_Active
+          action: 'aws:waitForAwsResourceProperty'
+          onFailure: 'step:signalfailure'
+          nextStep: 'RegisterADCforWorkSpaces'
+          inputs:
+            Service: ds
+            Api: DescribeDirectories
+            DesiredValues:
+              - Active
+            PropertySelector: '$.DirectoryDescriptions[0].Stage'
+            DirectoryIds:
+              - '{{LambdaCreateADC.DirectoryID}}'
+        
+        # Register the created AD Connector for WorkSpaces. 
+        - name: RegisterADCforWorkSpaces
+          action: 'aws:executeAwsApi'
+          onFailure: 'step:signalfailure'
+          nextStep: 'PutDirectoryIdinParameterStore'
+          inputs:
+            Service: workspaces
+            Api: RegisterWorkspaceDirectory
+            DirectoryId: '{{LambdaCreateADC.DirectoryID}}'
+            EnableWorkDocs: '{{EnableWorkDocs}}'
+            EnableSelfService: '{{EnableSelfService}}'
+            SubnetIds:
+              - '{{PrivateSubnet1ID}}'
+              - '{{PrivateSubnet2ID}}'
+            Tenancy: '{{Tenancy}}'
+
+        # Save Directory ID in SSM Parameter Store
+        - name: 'PutDirectoryIdinParameterStore'
+          action: 'aws:executeAwsApi'
+          onFailure: 'step:signalfailure'
+          nextStep: 'SaveADConfig'
+          inputs:
+            Service: ssm
+            Api: PutParameter
+            Name: WSDirectoryId
+            Value: '{{LambdaCreateADC.DirectoryID}}'
+            Type: String
+            Overwrite: true
+        
+        # Save AD parameters in SSM Parameter Store
+        - name: 'SaveADConfig'
+          action: 'aws:runCommand'
+          onFailure: 'step:signalfailure'
+          nextStep: 'signalsuccess'
+          inputs:
+              DocumentName: 'AWS-RunPowerShellScript'
+              InstanceIds:
+                - '{{dc2InstanceId.InstanceId}}'
+              Parameters:
+                commands:
+                  - |
+                    $username = '{{DomainUser}}'
+                      $ADServer1PrivateIP = '{{ADServer1PrivateIP}}'
+                      $ADServer2PrivateIP = '{{ADServer2PrivateIP}}'
+
+                      function Write-UserADInfoToSSM
+                      {
+                          [CmdletBinding()]
+                          [Alias()]
+                          [OutputType([int])]
+                          Param
+                          (
+                              [Parameter(Mandatory)]
+                              [string]$user,
+                      
+                              [Parameter(Mandatory)]
+                              [string]$AD1PrivateIP,
+                      
+                              [Parameter(Mandatory)]
+                              [string]$AD2PrivateIP
+                          )
+                      
+                          Begin
+                            {
+                              try{
+                                  Write-Output 'Getting AD User Bind and Base DN information'
+                                  $binddn = (Get-ADUser -Identity $user).distinguishedname
+                                  $basedn = $binddn -replace '^.*?,(..=.*)$', '$1'
+                              } catch{
+                                  Write-Error -Message "Unable to get users information for the user: $user" -Category InvalidResult -targetobject $_
+                              }
+                      
+                            }
+                          Process
+                          {
+                              try{
+                                  Write-Output "Writing BaseDN, BindDN and DNS Servers to SSM Parameter Store...."
+                                  Write-SSMParameter -Name "/LinOTP/Config/AD/BaseDN" -Type "String" -Value $basedn -Overwrite $true
+                                  Write-SSMParameter -Name "/LinOTP/Config/AD/BindDN" -Type "String" -Value $binddn -Overwrite $true
+                                  Write-SSMParameter -Name "/LinOTP/Config/AD/DNSServers" -Type "StringList" -Value "$AD1PrivateIP $AD2PrivateIP" -Overwrite $true
+                                  Write-Output "SSM Parameter values Saved Successfully!!!"
+                                  $completed = $true
+                      
+                              } catch{
+                                  
+                                  Write-Warning -Message "Unable to write to SSM Parameter Store, trying this action again in 15 Seconds"
+                                  Start-Sleep -Seconds 15
+                              }
+                      
+                              If(!$completed){
+                      
+                                  try{
+                                      Write-Output "Writing BaseDN, BindDN and DNS Servers to SSM Parameter Store...."
+                                      Write-SSMParameter -Name "/LinOTP/Config/AD/BaseDN" -Type "String" -Value $basedn -Overwrite $true
+                                      Write-SSMParameter -Name "/LinOTP/Config/AD/BindDN" -Type "String" -Value $binddn -Overwrite $true
+                                      Write-SSMParameter -Name "/LinOTP/Config/AD/DNSServers" -Type "StringList" -Value "$AD1PrivateIP $AD2PrivateIP" -Overwrite $true
+                                      Write-Output "SSM Parameter values Saved Successfully!!!"
+                      
+                                  } catch{
+                                  
+                                      Write-Output $_
+                                      Write-Error -Message "Unable to write to SSM Parameter Store" -ErrorAction Stop
+                                  }
+                              }
+                          }
+                      }
+                      
+                      
+                      [string]$token = Invoke-RestMethod -Headers @{"X-aws-ec2-metadata-token-ttl-seconds" = "21600"} -Method PUT -Uri http://169.254.169.254/latest/api/token
+                      
+                      try {
+                              
+                              Invoke-RestMethod -Headers @{"X-aws-ec2-metadata-token" = $token} -Method GET -Uri http://169.254.169.254/latest/meta-data/iam/security-credentials
+                      
+                          } catch {
+                      
+                              Write-Host "StatusCode:" $_.Exception.Response.StatusCode.Value__
+                              Write-Host "StatusDescription:" $_.Exception.Response.StatusDescription
+                              Write-Error -Message "Unable to reach the EC2 metadata service" -Category MetadataError -targetobject $_
+                      }
+                      
+                      
+                    Write-UserADInfoToSSM -user $username -AD1PrivateIP $ADServer1PrivateIP -AD2PrivateIP $ADServer2PrivateIP
+    
+              CloudWatchOutputConfig:
+                  CloudWatchOutputEnabled: 'true'
+                  CloudWatchLogGroupName: !Sub '/aws/QuickStart/SC1/WorkSpaces/${AWS::StackName}'                
+        # If all steps complete successfully signals CFN of Success
+        - name: 'signalsuccess'
+          action: 'aws:executeAwsApi'
+          isEnd: True
+          inputs:
+            Service: cloudformation
+            Api: SignalResource
+            LogicalResourceId: 'WaitCondition'
+            StackName: !Sub '${AWS::StackName}'
+            Status: SUCCESS
+            UniqueId: AUTOMATION-SUCCEEDED
+        
+        # If any steps fails signals CFN of Failure
+        - name: 'signalfailure'
+          action: 'aws:executeAwsApi'
+          inputs:
+            Service: cloudformation
+            Api: SignalResource
+            LogicalResourceId: 'WaitCondition'
+            StackName: !Sub '${AWS::StackName}'
+            Status: FAILURE
+            UniqueId: '{{dc2InstanceId.InstanceId}}'
+  WaitCondition:
+    DependsOn: SSMAutomationInvoker
+    Type: AWS::CloudFormation::WaitCondition
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT15M
+  
+  SSMAutomationInvoker:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SSMAutomationLambdaFunc.Arn
+      DocumentName: !Ref AWSQuickStartADConnector
+      AutomationAssumeRole: !GetAtt WSDSRole.Arn
+      DomainUser: !Ref DomainUser
+      FirstName: !Ref FirstName
+      LastName: !Ref LastName
+      VPCID: !Ref VPCID
+      PrivateSubnet1ID: !Ref PrivateSubnet1ID
+      PrivateSubnet2ID: !Ref PrivateSubnet2ID
+      ADServer1PrivateIP: !Ref ADServer1PrivateIP
+      ADServer2PrivateIP: !Ref ADServer2PrivateIP
+      DomainDNSName: !Ref DomainDNSName
+      ADServer1NetBIOSName: !Ref ADServer1NetBIOSName
+      ADServer2NetBIOSName: !Ref ADServer2NetBIOSName
+      EnableWorkDocs: !Ref EnableWorkDocs
+      EnableSelfService: !Ref EnableSelfService
+      Tenancy: !Ref Tenancy
+      DomainUserSecParamName: !Ref DomainUserSecrets
+      ADAltUserSecParamName: !Ref ADAltUserSecParamName
+      DSWorkspaceSGID: !GetAtt DirectoryServiceWorkSpaceSG.GroupId
+      DomainControllersSGID: !Ref DomainControllersSGID
+      
+  SSMAutomationLambdaFunc:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: |
+        Lambda function invoking SSM Automation
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import time
+          import cfnresponse
+          import logging
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          client = boto3.client('ssm')
+          def lambda_handler(event, context):
+            try:
+              response_data = {}
+              if event['RequestType'] == 'Delete':
+                logger.info("Processing Delete event - " + json.dumps(event))
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+              elif event['RequestType'] == 'Update':
+                logger.info("Processing UPDATE event - " + json.dumps(event))
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+              else:
+                logger.info("Processing Create event - " + json.dumps(event))
+                document_name = event['ResourceProperties']['DocumentName']
+                automation_assume_role = event['ResourceProperties']['AutomationAssumeRole']
+                domain_user = event['ResourceProperties']['DomainUser']
+                first_name = event['ResourceProperties']['FirstName']
+                last_name = event['ResourceProperties']['LastName']
+                vpc_id = event['ResourceProperties']['VPCID']
+                private_subnet1_id = event['ResourceProperties']['PrivateSubnet1ID']
+                private_subnet2_id = event['ResourceProperties']['PrivateSubnet2ID']
+                ad_server1_private_ip = event['ResourceProperties']['ADServer1PrivateIP']
+                ad_server2_private_ip = event['ResourceProperties']['ADServer2PrivateIP']
+                domain_dns_name = event['ResourceProperties']['DomainDNSName']
+                ad_server1_net_bios_name = event['ResourceProperties']['ADServer1NetBIOSName']
+                ad_server2_net_bios_name = event['ResourceProperties']['ADServer2NetBIOSName']
+                enable_workdocs = event['ResourceProperties']['EnableWorkDocs']
+                enable_self_service = event['ResourceProperties']['EnableSelfService']
+                tenancy = event['ResourceProperties']['Tenancy']
+                domain_user_sec_param_name = event['ResourceProperties']['DomainUserSecParamName']
+                ad_alt_user_sec_param_arn = event['ResourceProperties']['ADAltUserSecParamName']
+                domaincontrollers_sgid = event['ResourceProperties']['DomainControllersSGID']
+                ds_workspace_sgid = event['ResourceProperties']['DSWorkspaceSGID']
+                print(automation_assume_role)
+                response = client.start_automation_execution(DocumentName=document_name,Parameters={'AutomationAssumeRole':[automation_assume_role],'DSWorkspaceSGID':[ds_workspace_sgid],'DomainControllersSGID':[domaincontrollers_sgid],'ADAltUserSecParamName':[ad_alt_user_sec_param_arn],'DomainUserSecParamName':[domain_user_sec_param_name],'Tenancy':[tenancy],'EnableSelfService':[enable_self_service],'EnableWorkDocs':[enable_workdocs],'DomainUser':[domain_user],'FirstName':[first_name],'LastName':[last_name],'VPCID':[vpc_id],'PrivateSubnet1ID':[private_subnet1_id],'PrivateSubnet2ID':[private_subnet2_id],'ADServer1PrivateIP':[ad_server1_private_ip],'ADServer2PrivateIP':[ad_server1_private_ip],'DomainDNSName':[domain_dns_name],'ADServer2NetBIOSName':[ad_server2_net_bios_name],'ADServer1NetBIOSName':[ad_server1_net_bios_name]})
+                if response['AutomationExecutionId']!= None:                  
+                  #response_data['Data']['executionID'] = response['AutomationExecutionId']
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                else:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failure'})
+            except Exception as e:
+              print(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failure'})
+              return e   
+      MemorySize: 128
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Role: !Sub '${SSMAutomationInvokerLambdaExecutionRole.Arn}'
+   
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: cloudformation.amazonaws.com
+      FunctionName: !GetAtt SSMAutomationLambdaFunc.Arn
+      SourceArn: !Sub ${AWS::StackId}
+      SourceAccount: !Sub ${AWS::AccountId}
+  SSMAutomationInvokerLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName:
+          Fn::Sub: ${AWS::StackName}-lambda-execution-role-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+             -  ssm:DescribeAutomationExecutions
+             -  ssm:DescribeAutomationStepExecutions
+             -  ssm:GetAutomationExecution
+             -  ssm:StartAutomationExecution
+            Resource:
+             -  !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${AWSQuickStartADConnector}:$DEFAULT
+          
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt WSDSRole.Arn
+  WSDSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "WSDSRole-${AWS::StackName}-${AWS::Region}"
+      Policies:
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::aws-ssm-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::aws-windows-downloads-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::amazon-ssm-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::amazon-ssm-packages-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::${AWS::Region}-birdwatcher-prod/*
+                  - !Sub arn:${AWS::Partition}:s3:::patch-baseline-snapshot-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::aws-ssm-distributor-file-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::aws-ssm-document-attachments-${AWS::Region}/*
+          PolicyName: SSMAgent
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${S3Bucket}'
+                  - S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${S3Bucket}/${QSS3KeyPrefix}*'
+                  - S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              - Effect: Allow
+                Action: ssm:StartAutomationExecution
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${AWSQuickStartADConnector}:$DEFAULT
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:*:document/AWS-RunRemoteScript
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:*:document/AWS-RunPowerShellScript
+              - Effect: Allow
+                Action: 
+                  - ssm:SendCommand
+                  - ec2:ModifyInstanceAttribute
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${DC2InstanceId}
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${DC1InstanceId}
+              - Effect: Allow
+                Action: 
+                  - iam:GetInstanceProfile
+                  - iam:PutRolePolicy
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/*ADStack*ADServerProfile*
+                  - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*ADStack*ADServerRole*
+              - Effect: Allow
+                Action: ec2:ModifyInstanceAttribute
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${DC2InstanceId}
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${DC1InstanceId}
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${DomainControllersSGID}
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${DirectoryServiceWorkSpaceSG}
+              - Sid: ReadOperations
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ssm:DescribeInstanceInformation
+                  - ssm:ListCommands
+                  - ssm:ListCommandInvocations
+                Resource: '*'
+              - Effect: Allow
+                Action: cloudformation:SignalResource
+                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
+          PolicyName: AWS-Mgmt-Quick-Start-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Ref 'ADAltUserSecParamName'
+                  - !Ref 'DomainUserSecrets'
+          PolicyName: AWS-Mgd-AD-Secret-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ds:ConnectDirectory
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeNetworkInterfaces
+                  - ds:DescribeDirectories
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:CreateSecurityGroup
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:DeleteSecurityGroup
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:DeleteNetworkInterface
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/${VPCID}
+              - Effect: Allow
+                Action:
+                  - ds:DisableRadius
+                  - ds:EnableRadius
+                  - ds:UpdateRadius
+                  - ds:DeleteDirectory
+                  - ds:ConnectDirectory
+                  - ds:GetAuthorizedApplicationDetails
+                  - ds:ListAuthorizedApplications 
+                  - ds:AuthorizeApplication
+                  - ds:UnauthorizeApplication
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ds:${AWS::Region}:${AWS::AccountId}:directory/*
+              - Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:*/*
+          PolicyName: Create-ADConnector-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  #- ds:*
+                  - kms:ListAliases
+                  - kms:ListKeys
+                  - ec2:DescribeInternetGateways
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeAvailabilityZones
+                  - workdocs:RegisterDirectory
+                  - workdocs:DeregisterDirectory
+                  - workdocs:AddUserToGroup
+                  - workspaces:DescribeWorkspaceDirectories
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                - ssm:PutParameter
+                - ssm:GetParameter
+                Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${WSDirectoryId}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DomainUserBindDN}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DomainUserBaseDN}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DNSServers}
+              - Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:PassRole
+                  - iam:GetRole
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                Resource:
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+              - Effect: Allow
+                Action:
+                  - workspaces:RegisterWorkspaceDirectory
+                  - workspaces:DeregisterWorkspaceDirectory
+                Resource:
+                  - !Sub arn:${AWS::Partition}:workspaces:${AWS::Region}:${AWS::AccountId}:directory/*
+                  - !Sub arn:${AWS::Partition}:workspaces:${AWS::Region}:${AWS::AccountId}:workspace/*
+                  - !Sub arn:${AWS::Partition}:workspaces:${AWS::Region}:${AWS::AccountId}:*/*
+                  - !Sub arn:${AWS::Partition}:workspaces:${AWS::Region}:${AWS::AccountId}:workspacebundle/*
+          PolicyName: RegisterWorkSpace-Directory-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                 - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                 - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/WSDSRole
+          PolicyName: AWS-SSM-PassRole
+      Path: /
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
+      Tags:
+        - Key: StackName
+          Value: !Ref AWS::StackName
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - ssm.amazonaws.com
+                - lambda.amazonaws.com
+        Version: '2012-10-17'
+  WorkSpace:
+    DependsOn: 
+      - WaitCondition
+      - CleanUpCustomResource
+    Type: AWS::WorkSpaces::Workspace
+    Properties: 
+      BundleId: !Ref 'BundleId'
+      DirectoryId: !GetAtt 'WSDirectoryId.Value'
+      Tags: 
+        - Key: Name
+          Value: !Ref 'DomainUser'
+      UserName: !Ref 'DomainUser'
+      WorkspaceProperties: 
+        ComputeTypeName: !Ref 'ComputeTypeName'
+        RunningMode: !Ref 'RunningMode'
+        RootVolumeSizeGib: !Ref 'RootVolumeSizeGib'
+        UserVolumeSizeGib: !Ref 'UserVolumeSizeGib'
+      VolumeEncryptionKey: !If [WorkspaceVolumeEncryptionCheck,!Ref 'VolumeEncryptionKey', !Ref AWS::NoValue]
+      UserVolumeEncryptionEnabled: !Ref 'UserVolumeEncryptionEnabled'
+      RootVolumeEncryptionEnabled: !Ref 'RootVolumeEncryptionEnabled'
+  WorkSpaceRegCodeRetriever:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - WorkSpace
+    Properties:
+      ServiceToken: !GetAtt WorkSpaceRegCodeRetrieverLambdaFunction.Arn
+      WSDirectoryId: !GetAtt WSDirectoryId.Value
+  WorkSpaceRegCodeRetrieverLambdaFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: !Sub ${AWS::StackName}-WSRegCode-Retriever
+        Handler: index.handler
+        Runtime: python3.8
+        Role: !GetAtt WorkSpaceRegCodeRetrieverLambdaExecutionRole.Arn
+        Code:
+          ZipFile: |  
+            import boto3
+            import json
+            import logging
+            import cfnresponse
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+            workspace_directory_client = boto3.client('workspaces')
+            def handler(event, context):
+              try:
+                response_data = {}
+                if event['RequestType'] == 'Create':
+                  logger.info("Processing Create event - " + json.dumps(event))
+                  directory_id = event['ResourceProperties']['WSDirectoryId']
+                  described_ws_directory = workspace_directory_client.describe_workspace_directories(DirectoryIds=[directory_id])
+                  directories = described_ws_directory['Directories']
+                  registration_code = ''
+                  for directory in directories:
+                    registration_code = directory['RegistrationCode']                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'RegistrationCode': registration_code})
+                elif event['RequestType'] == 'Update':
+                  logger.info("Processing UPDATE event - " + json.dumps(event))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+                else:
+                  logger.info("Processing UPDATE event - " + json.dumps(event))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+              except Exception as e:
+                print(e)
+                cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failure'})
+                return e
+  
+  WorkSpaceRegCodeRetrieverLambdaFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: cloudformation.amazonaws.com
+      FunctionName: !GetAtt WorkSpaceRegCodeRetrieverLambdaFunction.Arn
+      SourceAccount: !Sub ${AWS::AccountId}
+      SourceArn: !Sub ${AWS::StackId}
+  WorkSpaceRegCodeRetrieverLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName:
+          Fn::Sub: ${AWS::StackName}-regcode-retriever-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+            - workspaces:DescribeWorkspaceDirectories
+            - ds:DescribeDirectories
+            Resource:
+              - "*"
+  
+  CleanUpCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - WSDirectoryId
+    Properties:
+      DirectoryServiceWorkSpaceSGID: !GetAtt DirectoryServiceWorkSpaceSG.GroupId
+      DC1InstanceId: !Ref DC1InstanceId
+      DC2InstanceId: !Ref DC2InstanceId
+      DomainControllersSGID: !Ref DomainControllersSGID
+      ServiceToken: !GetAtt CleanUpLambdaFunction.Arn
+      WSDirectoryId: !GetAtt WSDirectoryId.Value
+  CleanUpLambdaFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: !Sub ${AWS::StackName}-CleanUpFunction
+        Handler: index.handler
+        Runtime: python3.8
+        Timeout: 900
+        Role: !GetAtt CleanUpLambdaExecutionRole.Arn
+        Code:
+          ZipFile: |  
+            import boto3
+            import botocore
+            import json
+            import logging
+            import cfnresponse
+            import time
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+            iam_client = boto3.client('iam')
+            ec2_client = boto3.client('ec2')
+            workspace_directory_client = boto3.client('workspaces')
+            ds_client = boto3.client('ds')
+            def handler(event, context):
+              try:
+                response_data = {}
+                if event['RequestType'] == 'Create':
+                  logger.info("Processing Create event - " + json.dumps(event))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+                elif event['RequestType'] == 'Update':
+                  logger.info("Processing UPDATE event - " + json.dumps(event))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+                elif event['RequestType'] == 'Delete':
+                  logger.info("Processing Delete event - " + json.dumps(event))
+                  directory_service_workspace_sg_id = event['ResourceProperties']['DirectoryServiceWorkSpaceSGID']
+                  dc1_instance_id = event['ResourceProperties']['DC1InstanceId']
+                  dc2_instance_id = event['ResourceProperties']['DC2InstanceId']
+                  domain_controller_sg_id = event['ResourceProperties']['DomainControllersSGID']
+                  directory_id = event['ResourceProperties']['WSDirectoryId']
+                  
+                  ## De-Register WorkSpace Directory
+                  logger.info("De-Registering Workspaces - ")
+                  de_register_wd = workspace_directory_client.deregister_workspace_directory(DirectoryId=directory_id)
+                  
+                  ## Timer to let workspaces de-register directory - describing directory itself doesn't return status of workspaces either
+                  ## no waiters currently supported for either workspaces/directory boto 
+                  ## https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ds.html
+                  ## https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/workspaces.html
+                  time.sleep(10)
+                  
+                  ## Delete Directory - AD Connector
+                  logger.info("Deleting Directory - " + directory_id)
+                  delete_directory = ds_client.delete_directory(DirectoryId=directory_id)
+                  ## Timer to let directory service de-attach network interfaces - describing directory itself doesn't return status of workspaces either
+                  ## no waiters currently supported for either workspaces/directory boto 
+                  ## https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ds.html
+                  ## https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/workspaces.html
+                  
+                  described_directory = ds_client.describe_directories(DirectoryIds=[directory_id])
+                  directories = described_directory['DirectoryDescriptions']
+                  directory_status = directories[0]['Stage']
+                  while directory_status == 'Active' or directory_status == 'Deleting':
+                    time.sleep(20)
+                    logger.info("Directory - " + directory_id + "is still" + directory_status)
+                    redescribed_directory = ds_client.describe_directories(DirectoryIds=[directory_id])
+                    directories = redescribed_directory['DirectoryDescriptions']
+                    if directories:
+                      directory_status = directories[0]['Stage']
+                    else:
+                      directory_status = 'Deleted'
+                  
+                  ## Network Interface/security group cleanup workflow
+                  logger.info("Removing Directory Network Interfaces")
+                  directory_sg_name = directory_id+'_controllers'
+                  described_network_interfaces = ec2_client.describe_network_interfaces(Filters=[{'Name':'group-name','Values':[directory_sg_name]}])    
+                  network_interfaces = described_network_interfaces['NetworkInterfaces']
+                  for eni in network_interfaces:
+                    
+                    eni_id = eni['NetworkInterfaceId']
+                    deleting_directory_eni = ec2_client.delete_network_interface(NetworkInterfaceId=eni_id)
+                    logger.info(deleting_directory_eni)
+                  
+                  logger.info("Removing Directory Security Group")
+                  describe_directory_sg = ec2_client.describe_security_groups(Filters=[{'Name':'group-name','Values':[directory_sg_name]}])
+                  security_groups = describe_directory_sg['SecurityGroups']
+                  for sg in security_groups:
+                    directory_sg_id = sg['GroupId']
+                    delete_directory_sg = ec2_client.delete_security_group(GroupId=directory_sg_id)
+                    logger.info(delete_directory_sg)      
+                  
+                  ## Removing Security Groups
+                  logger.info("Removing Security Group from DC1 and DC2- ")
+                  remove_sg_from_dc1 = ec2_client.modify_instance_attribute(Groups=[domain_controller_sg_id],InstanceId=dc1_instance_id)
+                  remove_sg_from_dc2 = ec2_client.modify_instance_attribute(Groups=[domain_controller_sg_id],InstanceId=dc2_instance_id)
+                  
+                  ## Removing Inline Policy from main ADStack Role
+                  logger.info("Removing Inline Policy from main ADStack Role - ")
+                  described_instance = ec2_client.describe_instances(InstanceIds=[dc2_instance_id])
+                  reservations = described_instance['Reservations']
+                  instance_profile_arn = ''
+                  for reservation in reservations:
+                    instances = reservation['Instances']
+                    for instance in instances:
+                      instance_profile_arn = instance['IamInstanceProfile']['Arn']
+                  instance_profile_split_array = instance_profile_arn.split('/')
+                  instance_profile_name = instance_profile_split_array[1]
+                  instance_profile_object = iam_client.get_instance_profile(InstanceProfileName=instance_profile_name)
+                  roles_list = instance_profile_object['InstanceProfile']['Roles']
+                  role_name = ""
+                  for role in roles_list:
+                    role_name = role['RoleName']
+                  delete_inline_policy = iam_client.delete_role_policy(RoleName=role_name,PolicyName='Domain-User-Secret-Policy')
+                  
+                  ## Removing policies from default WorkSpace Role created by Macro
+                  logger.info("Removing Inline/Managed Policy from main AD Role - ")
+                  described_role = iam_client.get_role(RoleName='workspaces_DefaultRole')
+                  if described_role:
+                    described_role_tags = iam_client.list_role_tags(RoleName='workspaces_DefaultRole')
+                    tags = described_role_tags['Tags']
+                    if tags:
+                      for tag in tags:
+                        if (tag['Key'] == 'Created_By' and tag['Value'] == 'WorkSpacesQuickstart_SC1') or (tag['Key'] == 'Created_By' and tag['Value'] == 'WorkSpacesQuickstart_self_managed_existing_directory'):
+                          logger.info('WorkSpace Tag Found')
+                          logger.info('WorkSpaces default Role was created by QuickStart - Hence removing its managed policies')
+                          iam_client.detach_role_policy(RoleName='workspaces_DefaultRole',PolicyArn='arn:aws:iam::aws:policy/AmazonWorkSpacesServiceAccess')
+                          iam_client.detach_role_policy(RoleName='workspaces_DefaultRole',PolicyArn='arn:aws:iam::aws:policy/AmazonWorkSpacesSelfServiceAccess')
+                          polcies_list = iam_client.list_role_policies(RoleName='workspaces_DefaultRole')
+                          policies_names = polcies_list['PolicyNames']
+                          for policy_name in policies_names:
+                            if policy_name == 'SkyLightSelfServiceAccess' or policy_name == 'SkyLightServiceAccess':
+                              iam_client.delete_role_policy(RoleName='workspaces_DefaultRole',PolicyName=policy_name)
+                    else:
+                        logger.info('No tags found on the WorkSpace Default role')
+                  else:
+                      logger.info('No WorkSpace Default Role Found')
+                      
+                  logger.info("Sending SUCCESS Signal back to stack - ") 
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                else:
+                  logger.info("Sending SUCCESS Signal back to stack - ") 
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+              except botocore.exceptions.ClientError as error:
+                if error.response['Error']['Code'] == 'NoSuchEntityException':
+                  print('Error Message: {}'.format(err.response['Error']['Message']))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                else:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failure'})
+                  raise error
+  CleanUpLambdaFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: cloudformation.amazonaws.com
+      FunctionName: !GetAtt CleanUpLambdaFunction.Arn
+      SourceAccount: !Sub ${AWS::AccountId}
+      SourceArn: !Sub ${AWS::StackId}
+  CleanUpLambdaExecutionRole:
+    DependsOn:
+      - WaitCondition
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W3037*
+            - E2507
+            - W2511
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName:
+          Fn::Sub: ${AWS::StackName}-cleanup-lambda-execution-role-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+            - iam:GetRole
+            - iam:DeleteRolePolicy
+            Resource:
+            - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*ADStack*ADServerRole*
+          - Effect: Allow
+            Action:
+              - iam:GetRole
+              - iam:GetPolicy
+              - iam:DetachRolePolicy
+              - iam:ListRoleTags
+              - iam:ListRolePolicies
+              - iam:DeleteRolePolicy
+            Resource:
+              - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/workspaces_DefaultRole
+              - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonWorkSpacesServiceAccess
+              - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonWorkSpacesSelfServiceAccess
+          - Effect: Allow
+            Action:
+            - ec2:DescribeInstances
+            Resource:
+             - '*'
+          - Effect: Allow
+            Action:
+            - iam:GetInstanceProfile
+            Resource:
+             - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/*ADStack*ADServerProfile*
+          - Effect: Allow
+            Action:
+            - ec2:ModifyInstanceAttribute
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+              - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+              #- Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${DomainControllersSGID}
+              #- Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${DirectoryServiceWorkSpaceSG}
+          - Effect: Allow
+            Action:
+            - ec2:DeleteNetworkInterface
+            - ec2:DeleteSecurityGroup
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+              - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+          - Effect: Allow
+            Action:
+            - workspaces:DeregisterWorkspaceDirectory
+            - workspaces:ModifyClientProperties
+            - workspaces:ModifySelfservicePermissions
+            - workspaces:ModifyWorkspaceAccessProperties
+            - workspaces:ModifyWorkspaceCreationProperties
+            - workspaces:RestoreWorkspace
+            - ds:AuthorizeApplication
+            - ds:UnauthorizeApplication
+            - ds:ConnectDirectory
+            - ds:DeleteDirectory
+            - ds:UpdateRadius
+            - ds:UpdateSettings
+            - ds:DisableRadius
+            - ds:EnableRadius
+            - ds:RemoveIpRoutes
+            - ds:VerifyTrust
+            Resource:
+              - !Join ['',['arn:',!Ref AWS::Partition,':workspaces:',!Ref AWS::Region,':', !Ref AWS::AccountId,':','directory/',!GetAtt WSDirectoryId.Value]]
+              - !Join ['',['arn:',!Ref AWS::Partition,':ds:',!Ref AWS::Region,':', !Ref AWS::AccountId,':','directory/',!GetAtt WSDirectoryId.Value]]
+          - Effect: Allow
+            Action:
+            - workspaces:DescribeWorkspaces
+            - workspaces:DescribeTags
+            - workspaces:DescribeWorkspaceDirectories
+            - ds:DescribeDirectories
+            - ec2:DescribeInternetGateways
+            - ec2:DescribeSecurityGroups
+            - ec2:DescribeRouteTables
+            - ec2:DescribeVpcs
+            - ec2:DescribeSubnets
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DescribeAvailabilityZones
+            - sns:ListSubscriptions
+            - sns:ListTopics
+            - sns:GetSubscriptionAttributes
+            - kms:ListKeys
+            - kms:ListAliases
+            # - organizations:Describe*
+            # - organizations:List*
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - sns:ListSubscriptionsByTopic
+            - sns:GetTopicAttributes
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:*
+            
+Outputs:
+  WorkspacesRegistrationCode:
+    Description: Registration code of launched WorkSpace.
+    Value: !GetAtt WorkSpaceRegCodeRetriever.RegistrationCode
+    Export:
+      Name: AWS-QuickStart-WorkSpace-RegistrationCode
+  WorkSpaceID:
+    Description: WorkSpace ID for user WorkSpace.
+    Value: !Ref 'WorkSpace'
+    Export:
+      Name: AWS-QuickStart-WorkSpaceID
+  DomainUser:
+    Description: WorkSpace users user name.
+    Value: !Ref 'DomainUser'
+    Export:
+      Name: AWS-QuickStart-WorkSpace-Username
+  DomainUserSecretsArn:
+    Description: WorkSpace AD user secrets ARN.
+    Value: !Ref 'DomainUserSecrets'
+  SNSLambdaPublisherExecutionRole:
+    Description: 'Role assumed by Lambda SNS publisher.'
+    Value: !Ref SNSDeliveryLambdaExecutionRoleExportValue
+    Export:
+      Name: !Sub '${SNSDeliveryLambdaExecutionRoleExportName}'
+  SNSStackStatusTopic:
+    Description: 'Topic to publish emails to.'
+    Value: !Ref SNSStackStatusTopicExportValue
+    Export:
+      Name: !Sub '${SNSStackStatusTopicExportName}'

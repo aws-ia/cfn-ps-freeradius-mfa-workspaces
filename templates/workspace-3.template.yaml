@@ -1,0 +1,1095 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform:
+  - WorkSpaceDefaultRoleMacro
+Description: >-
+  This template creates MFA-enabled WorkSpace for the Domain User specified. 
+  **WARNING** This template creates Amazon EC2 Windows instance and related resources. You will be billed for the AWS resources used if you
+  create a stack from this template. (qs-1teeu2l9b)
+Metadata:
+  QuickStartDocumentation:
+    EntrypointName: 'Parameters for Workspace into existing Directory Service.'
+    Order: '2'
+  QSLint:
+    Exclusions: [ W9002, W9003, W9006, W2511, W3037 ]
+  cfn-lint:
+    config:
+      ignore_checks:
+        - E9101
+        - W9006
+        - W9002
+        - W9003
+        - W2511
+        - W9001
+      ignore_reason:
+        - "Execution part SSM Automation"
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Active Directory Domain Services Configuration
+        Parameters:
+          - DirectoryID
+          - DomainUser
+          - DomainUserPassword
+      - Label:
+          default: WorkSpaces and WorkSpaces Directory Configuration.
+        Parameters:
+          - EnableSelfService
+          - EnableWorkDocs
+          - Tenancy
+          - BundleId
+          - ComputeTypeName
+          - RunningMode
+          - UserVolumeEncryptionEnabled
+          - RootVolumeEncryptionEnabled
+          - VolumeEncryptionKey
+          - UserVolumeSizeGib
+          - RootVolumeSizeGib
+    ParameterLabels:
+      DirectoryID:
+        default: Directory ID for WorkSpaces
+      DomainUser:
+        default: Normal Domain user that will be used to launch WorkSpace
+      DomainUserPassword:
+        default: New Password for WorkSpace User 
+      EnableSelfService:
+        default: Enable Self Service on the WorkSpace Directory
+      EnableWorkDocs:
+        default: Enable WorkDocs on the WorkSpace Directory
+      Tenancy:
+        default: WorkSpaces VPC Tenancy
+      BundleId:
+        default: Enter the WorkSpace BundleID you want to use
+      ComputeTypeName:
+        default: 'Select the Workspaces Compute type. NOTE: Ensure the BundleId supports the compute type selected'
+      RunningMode:
+        default: WorkSpaces running mode
+      UserVolumeEncryptionEnabled:
+        default: Encrypt WorkSpace user volume
+      RootVolumeEncryptionEnabled:
+        default: Encrypt WorkSpace user volume
+      VolumeEncryptionKey:
+        default: Enter the WorkSpace KMS key to encrypt volumes 
+      UserVolumeSizeGib:
+        default: Size of the user volume storage for WorkSpace
+      RootVolumeSizeGib:
+        default: Size of the root volume storage for WorkSpace
+Parameters:
+  DirectoryID:
+    Default: 'd-123abc'
+    Description: Directory ID for WorkSpaces
+    MaxLength: '25'
+    MinLength: '2'
+    Type: String
+  DomainUser:
+    AllowedPattern: '[a-zA-Z0-9]*'
+    Default: JaneDoe
+    Description: Username for the AD account that WorkSpace will be launched for
+    MaxLength: '25'
+    MinLength: '5'
+    Type: String
+  DomainUserPassword:
+    AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
+    Description: Password for the WorkSpace user account. Must be at least 8 characters containing letters, numbers and symbols
+    MaxLength: '32'
+    MinLength: '8'
+    NoEcho: 'true'
+    Type: String
+  EnableWorkDocs:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: Indicates whether Amazon WorkDocs is enabled or disabled. If you have enabled this parameter and WorkDocs is not available in the Region, you will receive an OperationNotSupportedException error. Set EnableWorkDocs to disabled, and try again
+    Type: String
+  EnableSelfService:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Indicates whether self-service capabilities are enabled or disabled
+    Type: String
+  Tenancy:
+    AllowedValues:
+      - 'DEDICATED'
+      - 'SHARED'
+    Default: 'SHARED'
+    Description: WorkSpace directory is dedicated or shared. To use Bring Your Own License (BYOL) images, this value must be set to DEDICATED and your Amazon Web Services account must be enabled for BYOL. If your account has not been enabled for BYOL, you will receive an InvalidParameterValuesException error
+    Type: String
+  RootVolumeEncryptionEnabled:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Indicates whether the data stored on the root volume is encrypted.
+    Type: String
+  UserVolumeEncryptionEnabled:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Indicates whether the data stored on the user volume is encrypted.
+    Type: String
+  VolumeEncryptionKey:
+    Type: String
+    Default: 'default'
+    Description: The symmetric AWS KMS key used to encrypt data stored on your WorkSpace. Amazon WorkSpaces does not support asymmetric KMS keys. you must specify the KMS Key ID you want to use.
+  RootVolumeSizeGib:
+    Default: '80'
+    Description: The size of the user storage. See here allowed user/root volume mappings - https://docs.aws.amazon.com/workspaces/latest/adminguide/modify-workspaces.html#change_volume_sizes
+    Type: Number
+  UserVolumeSizeGib:
+    Default: '50'
+    Description: The size of the user storage. See here allowed user/root volume mappings - https://docs.aws.amazon.com/workspaces/latest/adminguide/modify-workspaces.html#change_volume_sizes
+    Type: Number
+  BundleId:
+    Default: 'wsb-gm4d5tx2v'
+    AllowedPattern: '^wsb-[0-9a-z]{8,63}$'
+    Description: The identifier of the bundle for the WorkSpace. You can use DescribeWorkspaceBundles to list the available bundles.
+    Type: String
+  ComputeTypeName:
+    Default: 'PERFORMANCE'
+    AllowedValues:
+      - VALUE
+      - STANDARD
+      - POWERPRO
+      - POWER
+      - PERFORMANCE
+      - GRAPHICSPRO
+      - GRAPHICS
+    Description: The compute type valid values are - VALUE | STANDARD | PERFORMANCE | POWER | GRAPHICS | POWERPRO | GRAPHICSPRO
+    Type: String
+  RunningMode:
+    Default: 'AUTO_STOP'
+    AllowedValues:
+      - ALWAYS_ON
+      - AUTO_STOP
+    Description: Select the Workspaces running mode
+    Type: String
+  ## SNS 
+  SNSDeliveryLambdaExecutionRoleExportName:
+    Description: Name of export for Execution role for SNS publisher Lambda 
+    Type: String
+    Default: ''
+  SNSStackStatusTopicExportName:
+    Description: Name of Export of Topic subscribed by user earlier and exported by parent stack
+    Type: String
+    Default: ''
+  SNSDeliveryLambdaExecutionRoleExportValue:
+    Description: Execution role for SNS publisher Lambda 
+    Type: String
+    Default: ''
+  SNSStackStatusTopicExportValue:
+    Description: Topic subscribed by user earlier and exported by parent stack
+    Type: String
+    Default: ''
+  QSS3BucketName:
+    Default: 'aws-quickstart'
+    Description: '3 bucket name for the Quick Start assets. Quick Start bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-)'
+    Type: 'String'
+  QSS3KeyPrefix:
+    Default: 'quickstart-freeradius-mfa-workspaces/'
+    Description: 'S3 key prefix for the Quick Start assets. Quick Start key prefix can include numbers, lowercase letters, uppercase letters, hyphens (-), and forward slash (/)'
+    Type: 'String'
+  
+Conditions:
+  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-quickstart']
+  WorkspaceVolumeEncryptionCheck: !Or [!Equals [!Ref UserVolumeEncryptionEnabled, "true"], !Equals [!Ref RootVolumeEncryptionEnabled, "true"]]
+  
+Resources:
+
+  DNSServers:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: AD DNS Servers used for LinOTP LDAP Connection. 
+      Name: /LinOTP/Config/extAD/DNSServers
+      Type: StringList
+      Value: '1.1.1.1'
+  
+  
+  RegisterDSforWorkSpacesDoc:
+    DependsOn:
+      - DNSServers
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Tags:
+        - Key: StackName
+          Value: !Ref AWS::StackName
+      Content:
+        schemaVersion: '0.3'
+        description: 'Checks if provided Directory ID is registered for WorkSpaces, registers it if not.'
+        assumeRole: '{{AutomationAssumeRole}}'
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            description: "The ARN of the IAM role used for SSM Automation."
+          DirectoryID:
+            type: String
+            description: " Directory ID for WorkSpaces"
+          DomainUser:
+            description: 'Domain User'
+            type: 'String'
+            default: 'TestUser'
+          DomainUserPassword:
+            description: "password of the WorkSpace user"
+            type: 'String'
+            default: 'xxxxxxx'
+          EnableWorkDocs:
+            default: true
+            description: 
+              'Do you want to enable WorkDocs on the WorkSpace Directory?'
+            type: 'Boolean'
+          EnableSelfService:
+            default: true
+            description: 
+              'Do you want to enable Self Service on the WorkSpace Directory?'
+            type: 'Boolean'
+          Tenancy:
+            default: 'SHARED'
+            description:
+              'Indicates whether your WorkSpace directory is dedicated or shared. To use Bring Your Own License (BYOL) images, this value must be set to DEDICATED and your Amazon Web Services account must be enabled for BYOL.'
+            type: 'String'
+          StackName:
+            default: ''
+            description: 'Stack Name Input for cfn resource signal'
+            type: 'String'
+            
+        mainSteps:
+          - name: 'describeDirectory'
+            action: aws:executeAwsApi
+            onFailure: 'step:signalfailure'
+            nextStep: 'writeDnsServerIpsToParameterStore'
+            inputs:
+              Service: ds
+              Api: DescribeDirectories
+              DirectoryIds: 
+              - '{{DirectoryID}}'
+            outputs:
+              - Name: DirectoryId
+                Selector: '$.DirectoryDescriptions[0].DirectoryId'
+                Type: 'String'
+              - Name: DNSName
+                Selector: '$.DirectoryDescriptions[0].Name'
+                Type: 'String'
+              - Name: DCInstance1IP
+                Selector: '$.DirectoryDescriptions[0].DnsIpAddrs[0]'
+                Type: 'String'
+              - Name: DCInstance2IP
+                Selector: '$.DirectoryDescriptions[0].DnsIpAddrs[1]'
+                Type: 'String'
+              - Name: VPCId
+                Selector: '$.DirectoryDescriptions[0].VpcSettings.VpcId'
+                Type: 'String'
+              - Name: Subnet1Id
+                Selector: '$.DirectoryDescriptions[0].VpcSettings.SubnetIds[0]'
+                Type: 'String'
+              - Name: Subnet2Id
+                Selector: '$.DirectoryDescriptions[0].VpcSettings.SubnetIds[1]'
+                Type: 'String'
+              - Name: DirectorySGId
+                Selector: '$.DirectoryDescriptions[0].VpcSettings.SecurityGroupId'
+            
+          - name: writeDnsServerIpsToParameterStore
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.8
+              Handler: script_handler
+              Script: |-
+                import boto3
+                ssm_client = boto3.client('ssm')
+                def combine_dnsserver_ips(*items):
+                  final_list = []
+                  if len(items) == 0:
+                    return final_list
+                  else:
+                    for x in items:
+                      final_list.append(str(x))
+                  return (",".join(final_list))
+                def script_handler(events, context):
+                  dns_ip_1 = events['dns_ip_1']
+                  dns_ip_2 = events['dns_ip_2']
+                  ssm_param_name = events['ssm_param']
+                  dns_ips = combine_dnsserver_ips(dns_ip_1, dns_ip_2)
+                  response = ssm_client.put_parameter(
+                    Name=ssm_param_name,
+                    Type='StringList',
+                    Overwrite=True,
+                    Value= dns_ips
+                  )
+                  return response
+              InputPayload:
+                dns_ip_1: '{{describeDirectory.DCInstance1IP}}'
+                dns_ip_2: '{{describeDirectory.DCInstance2IP}}'
+                ssm_param: !Ref DNSServers
+            description: Write DNS Server IP addresses to SSM Parameter Store
+            nextStep: isDirectoryRegistered
+
+          - name: isDirectoryRegistered
+            action: 'aws:executeScript'
+            outputs:
+              - Name: registration_status
+                Type: Boolean
+                Selector: $.Payload.status
+            inputs:
+              Runtime: python3.8
+              Handler: script_handler
+              Script: |-
+                import boto3
+                wks_client = boto3.client("workspaces")
+                def script_handler(events, context):
+                    directory_id = events['directoryId']
+                    try:
+                        response = wks_client.describe_workspace_directories(DirectoryIds=[directory_id])
+                        if len(response["Directories"]) == 0:
+                            return {"status": False}
+                        else:
+                            return {"status": True}
+                    except:
+                        return {"status": False}
+              InputPayload:
+                directoryId: '{{DirectoryID}}'
+            description: Check if provided Directory ID is Registered.
+            nextStep: branch
+          - name: branch
+            action: 'aws:branch'
+            inputs:
+              Choices:
+                - NextStep: signalsuccess
+                  Variable: '{{isDirectoryRegistered.registration_status}}'
+                  BooleanEquals: true
+                - NextStep: RegisterDSforWorkSpaces
+                  Variable: '{{isDirectoryRegistered.registration_status}}'
+                  BooleanEquals: false
+
+          - name: RegisterDSforWorkSpaces
+            action: 'aws:executeAwsApi'
+            onFailure: 'step:signalfailure'
+            inputs:
+              Service: workspaces
+              Api: RegisterWorkspaceDirectory
+              DirectoryId: '{{describeDirectory.DirectoryId}}'
+              EnableWorkDocs: '{{EnableWorkDocs}}'
+              EnableSelfService: '{{EnableSelfService}}'
+              Tenancy: '{{Tenancy}}'             
+
+          # If all steps complete successfully signals CFN of Success
+          - name: 'signalsuccess'
+            action: 'aws:executeAwsApi'
+            isEnd: True
+            inputs:
+              Service: cloudformation
+              Api: SignalResource
+              LogicalResourceId: 'WaitCondition'
+              StackName: !Sub '${AWS::StackName}'
+              Status: SUCCESS
+              UniqueId: AUTOMATION-SUCCEEDED
+          - name: sleepend
+            action: aws:sleep
+            isEnd: True
+            inputs:
+              Duration: PT1S
+          
+          # If any steps fails signals CFN of Failure
+          - name: 'signalfailure'
+            action: 'aws:executeAwsApi'
+            inputs:
+              Service: cloudformation
+              Api: SignalResource
+              LogicalResourceId: 'SSMAutomationInvoker'
+              StackName: !Sub '${AWS::StackName}'
+              Status: FAILURE
+              UniqueId: AUTOMATION-FAILED
+
+  WaitCondition:
+    DependsOn: SSMAutomationInvoker
+    Type: AWS::CloudFormation::WaitCondition
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT5M
+  
+  SSMAutomationInvoker:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SSMAutomationLambdaFunc.Arn
+      DocumentName: !Ref RegisterDSforWorkSpacesDoc
+      AutomationAssumeRole: !GetAtt WSDSRole.Arn
+      DirectoryID: !Ref DirectoryID
+      DomainUser: !Ref DomainUser
+      DomainUserPassword: !Ref DomainUserPassword
+      EnableWorkDocs: !Ref EnableWorkDocs
+      EnableSelfService: !Ref EnableSelfService
+      Tenancy: !Ref Tenancy
+      
+  SSMAutomationLambdaFunc:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: |
+        Lambda function invoking SSM Automation
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import time
+          import cfnresponse
+          import logging
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          client = boto3.client('ssm')
+          def lambda_handler(event, context):
+            try:
+              response_data = {}
+              if event['RequestType'] == 'Delete':
+                logger.info("Processing Delete event - " + json.dumps(event))
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+              elif event['RequestType'] == 'Update':
+                logger.info("Processing UPDATE event - " + json.dumps(event))
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+              else:
+                logger.info("Processing Create event - " + json.dumps(event))
+                document_name = event['ResourceProperties']['DocumentName']
+                automation_assume_role = event['ResourceProperties']['AutomationAssumeRole']
+                domain_user = event['ResourceProperties']['DomainUser']
+                user_password = event['ResourceProperties']['DomainUserPassword']
+                directory_id = event['ResourceProperties']['DirectoryID']
+                enable_workdocs = event['ResourceProperties']['EnableWorkDocs']
+                enable_self_service = event['ResourceProperties']['EnableSelfService']
+                tenancy = event['ResourceProperties']['Tenancy']
+                
+                print(automation_assume_role)
+                response = client.start_automation_execution(DocumentName=document_name,Parameters={'AutomationAssumeRole':[automation_assume_role],'Tenancy':[tenancy],'DirectoryID':[directory_id],'EnableSelfService':[enable_self_service],'EnableWorkDocs':[enable_workdocs],'DomainUser':[domain_user],'DomainUserPassword':[user_password]})
+                if response['AutomationExecutionId']!= None:                  
+                  #response_data['Data']['executionID'] = response['AutomationExecutionId']
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                else:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failure'})
+            except Exception as e:
+              print(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failure'})
+              return e   
+      MemorySize: 128
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Role: !Sub '${SSMAutomationInvokerLambdaExecutionRole.Arn}'
+   
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: cloudformation.amazonaws.com
+      FunctionName: !GetAtt SSMAutomationLambdaFunc.Arn
+      SourceArn: !Sub ${AWS::StackId}
+      SourceAccount: !Sub ${AWS::AccountId}
+  SSMAutomationInvokerLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName:
+          Fn::Sub: ${AWS::StackName}-lambda-execution-role-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+             -  ssm:DescribeAutomationExecutions
+             -  ssm:DescribeAutomationStepExecutions
+             -  ssm:GetAutomationExecution
+             -  ssm:StartAutomationExecution
+            Resource:
+             -  !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${RegisterDSforWorkSpacesDoc}:$DEFAULT
+          
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt WSDSRole.Arn
+  WSDSRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - EIAMPolicyWildcardResource
+          ignore_reasons:
+            - EIAMPolicyWildcardResource: "Scope is limited to least privilege"
+    Properties:
+      RoleName: !Sub "WSDSRole-${AWS::StackName}-${AWS::Region}"
+      Policies:
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::aws-ssm-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::aws-windows-downloads-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::amazon-ssm-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::amazon-ssm-packages-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::${AWS::Region}-birdwatcher-prod/*
+                  - !Sub arn:${AWS::Partition}:s3:::patch-baseline-snapshot-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::aws-ssm-distributor-file-${AWS::Region}/*
+                  - !Sub arn:${AWS::Partition}:s3:::aws-ssm-document-attachments-${AWS::Region}/*
+          PolicyName: SSMAgent
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${S3Bucket}'
+                  - S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${S3Bucket}/${QSS3KeyPrefix}*'
+                  - S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+              - Effect: Allow
+                Action: ssm:StartAutomationExecution
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${RegisterDSforWorkSpacesDoc}:$DEFAULT
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:*:document/AWS-RunRemoteScript
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:*:document/AWS-RunPowerShellScript
+              - Effect: Allow
+                Action: 
+                  - ssm:SendCommand
+                  - ec2:ModifyInstanceAttribute
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+              - Effect: Allow
+                Action: 
+                  - iam:GetInstanceProfile
+                  - iam:PutRolePolicy
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/*
+                  - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+              - Effect: Allow
+                Action: ec2:ModifyInstanceAttribute
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+              - Sid: ReadOperations
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ssm:DescribeInstanceInformation
+                  - ssm:ListCommands
+                  - ssm:ListCommandInvocations
+                Resource: '*'
+              - Effect: Allow
+                Action: cloudformation:SignalResource
+                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
+          PolicyName: AWS-Mgmt-Quick-Start-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ds:ConnectDirectory
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeNetworkInterfaces
+                  - ds:DescribeDirectories
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:CreateSecurityGroup
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:DeleteSecurityGroup
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:DeleteNetworkInterface
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
+              - Effect: Allow
+                Action:
+                  - ds:DisableRadius
+                  - ds:EnableRadius
+                  - ds:UpdateRadius
+                  - ds:DeleteDirectory
+                  - ds:ConnectDirectory
+                  - ds:GetAuthorizedApplicationDetails
+                  - ds:ListAuthorizedApplications 
+                  - ds:AuthorizeApplication
+                  - ds:UnauthorizeApplication
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ds:${AWS::Region}:${AWS::AccountId}:directory/*
+              - Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:*/*
+          PolicyName: Create-ADConnector-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:ListAliases
+                  - kms:ListKeys
+                  - ec2:DescribeInternetGateways
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeAvailabilityZones
+                  - workdocs:RegisterDirectory
+                  - workdocs:DeregisterDirectory
+                  - workdocs:AddUserToGroup
+                  - workspaces:DescribeWorkspaceDirectories
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                - ssm:PutParameter
+                - ssm:GetParameter
+                Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DNSServers}
+              - Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:PassRole
+                  - iam:GetRole
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                Resource:
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+              - Effect: Allow
+                Action:
+                  - workspaces:RegisterWorkspaceDirectory
+                  - workspaces:DeregisterWorkspaceDirectory
+                Resource:
+                  - !Sub arn:${AWS::Partition}:workspaces:${AWS::Region}:${AWS::AccountId}:directory/*
+                  - !Sub arn:${AWS::Partition}:workspaces:${AWS::Region}:${AWS::AccountId}:workspace/*
+                  - !Sub arn:${AWS::Partition}:workspaces:${AWS::Region}:${AWS::AccountId}:*/*
+                  - !Sub arn:${AWS::Partition}:workspaces:${AWS::Region}:${AWS::AccountId}:workspacebundle/*
+          PolicyName: RegisterWorkSpace-Directory-Policy
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                 - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                 - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/WSDSRole
+              - Effect: Allow
+                Action:
+                - ssm:PutParameter
+                - ssm:GetParameter
+                Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DNSServers}
+          PolicyName: AWS-SSM-PassRole
+      Path: /
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
+      Tags:
+        - Key: StackName
+          Value: !Ref AWS::StackName
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - ssm.amazonaws.com
+                - lambda.amazonaws.com
+        Version: '2012-10-17'
+  WorkSpace:
+    DependsOn: 
+      - WaitCondition
+      - CleanUpCustomResource
+    Type: AWS::WorkSpaces::Workspace
+    Properties: 
+      BundleId: !Ref 'BundleId'
+      DirectoryId: !Ref DirectoryID
+      Tags: 
+        - Key: Name
+          Value: !Ref 'DomainUser'
+      UserName: !Ref 'DomainUser'
+      WorkspaceProperties: 
+        ComputeTypeName: !Ref 'ComputeTypeName'
+        RunningMode: !Ref 'RunningMode'
+        RootVolumeSizeGib: !Ref 'RootVolumeSizeGib'
+        UserVolumeSizeGib: !Ref 'UserVolumeSizeGib'
+      VolumeEncryptionKey: !Ref 'VolumeEncryptionKey'
+      UserVolumeEncryptionEnabled: !Ref 'UserVolumeEncryptionEnabled'
+      RootVolumeEncryptionEnabled: !Ref 'RootVolumeEncryptionEnabled'
+  WorkSpaceRegCodeRetriever:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - WorkSpace
+    Properties:
+      ServiceToken: !GetAtt WorkSpaceRegCodeRetrieverLambdaFunction.Arn
+      WSDirectoryId: !Ref DirectoryID
+  WorkSpaceRegCodeRetrieverLambdaFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: !Sub ${AWS::StackName}-WSRegCode-Retriever
+        Handler: index.handler
+        Runtime: python3.8
+        Role: !GetAtt WorkSpaceRegCodeRetrieverLambdaExecutionRole.Arn
+        Code:
+          ZipFile: |  
+            import boto3
+            import json
+            import logging
+            import cfnresponse
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+            workspace_directory_client = boto3.client('workspaces')
+            def handler(event, context):
+              try:
+                response_data = {}
+                if event['RequestType'] == 'Create':
+                  logger.info("Processing Create event - " + json.dumps(event))
+                  directory_id = event['ResourceProperties']['WSDirectoryId']
+                  described_ws_directory = workspace_directory_client.describe_workspace_directories(DirectoryIds=[directory_id])
+                  directories = described_ws_directory['Directories']
+                  registration_code = ''
+                  for directory in directories:
+                    registration_code = directory['RegistrationCode']                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'RegistrationCode': registration_code})
+                elif event['RequestType'] == 'Update':
+                  logger.info("Processing UPDATE event - " + json.dumps(event))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+                else:
+                  logger.info("Processing UPDATE event - " + json.dumps(event))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+              except Exception as e:
+                print(e)
+                cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failure'})
+                return e
+  
+  WorkSpaceRegCodeRetrieverLambdaFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: cloudformation.amazonaws.com
+      FunctionName: !GetAtt WorkSpaceRegCodeRetrieverLambdaFunction.Arn
+      SourceAccount: !Sub ${AWS::AccountId}
+      SourceArn: !Sub ${AWS::StackId}
+  WorkSpaceRegCodeRetrieverLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName:
+          Fn::Sub: ${AWS::StackName}-regcode-retriever-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+            - workspaces:DescribeWorkspaceDirectories
+            - ds:DescribeDirectories
+            Resource:
+              - "*"
+  CleanUpCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt CleanUpLambdaFunction.Arn
+      WSDirectoryId: !Ref DirectoryID
+  CleanUpLambdaFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: !Sub ${AWS::StackName}-CleanUpFunction
+        Handler: index.handler
+        Runtime: python3.8
+        Timeout: 900
+        Role: !GetAtt CleanUpLambdaExecutionRole.Arn
+        Code:
+          ZipFile: |  
+            import boto3
+            import json
+            import logging
+            import cfnresponse
+            import botocore
+            import time
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+            iam_client = boto3.client('iam')
+            ec2_client = boto3.client('ec2')
+            workspace_directory_client = boto3.client('workspaces')
+            ds_client = boto3.client('ds')
+            def handler(event, context):
+              try:
+                response_data = {}
+                if event['RequestType'] == 'Create':
+                  logger.info("Processing Create event - " + json.dumps(event))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+                elif event['RequestType'] == 'Update':
+                  logger.info("Processing UPDATE event - " + json.dumps(event))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Response': 'Success'})
+                elif event['RequestType'] == 'Delete':
+                  logger.info("Processing Delete event - " + json.dumps(event))
+                  directory_id = event['ResourceProperties']['WSDirectoryId']
+                  
+                  ## De-Register WorkSpace Directory
+                  logger.info("De-Registering Workspaces - ")
+                  de_register_wd = workspace_directory_client.deregister_workspace_directory(DirectoryId=directory_id)
+                  
+                  ## Timer to let workspaces de-register directory - describing directory itself doesn't return status of workspaces either
+                  ## no waiters currently supported for either workspaces/directory boto 
+                  ## https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ds.html
+                  ## https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/workspaces.html
+                  time.sleep(10)
+                  
+                  ## Removing Inline Policy from main AD Role
+                  logger.info("Removing Inline Policy from main AD Role - ")
+                  described_instance = ec2_client.describe_instances(Filters=[{'Name':'private-ip-address','Values':[mgmnt_ins_private_ip]}])
+                  reservations = described_instance['Reservations']
+                  instance_profile_arn = ''
+                  for reservation in reservations:
+                    instances = reservation['Instances']
+                    for instance in instances:
+                      instance_profile_arn = instance['IamInstanceProfile']['Arn']
+                  instance_profile_split_array = instance_profile_arn.split('/')
+                  instance_profile_name = instance_profile_split_array[1]
+                  instance_profile_object = iam_client.get_instance_profile(InstanceProfileName=instance_profile_name)
+                  roles_list = instance_profile_object['InstanceProfile']['Roles']
+                  role_name = ""
+                  for role in roles_list:
+                    role_name = role['RoleName']
+                  delete_inline_policy = iam_client.delete_role_policy(RoleName=role_name,PolicyName='Domain-User-Secret-Policy')
+                  
+                  ## Removing policies from default WorkSpace Role created by Macro
+                  logger.info("Removing Inline/Managed Policy from main AD Role - ")
+                  described_role = iam_client.get_role(RoleName='workspaces_DefaultRole')
+                  if described_role:
+                    described_role_tags = iam_client.list_role_tags(RoleName='workspaces_DefaultRole')
+                    tags = described_role_tags['Tags']
+                    if tags:
+                      for tag in tags:
+                        if tag['Key'] == 'Created_By' and tag['Value'] == 'WorkSpacesQuickstart_SC3a':
+                          logger.info('WorkSpace Tag Found')
+                          logger.info('WorkSpaces default Role was created by QuickStart - Hence removing its managed policies')
+                          iam_client.detach_role_policy(RoleName='workspaces_DefaultRole',PolicyArn='arn:aws:iam::aws:policy/AmazonWorkSpacesServiceAccess')
+                          iam_client.detach_role_policy(RoleName='workspaces_DefaultRole',PolicyArn='arn:aws:iam::aws:policy/AmazonWorkSpacesSelfServiceAccess')
+                          polcies_list = iam_client.list_role_policies(RoleName='workspaces_DefaultRole')
+                          policies_names = polcies_list['PolicyNames']
+                          for policy_name in policies_names:
+                            if policy_name == 'SkyLightSelfServiceAccess' or policy_name == 'SkyLightServiceAccess':
+                              iam_client.delete_role_policy(RoleName='workspaces_DefaultRole',PolicyName=policy_name)
+                    else:
+                        logger.info('No tags found on the WorkSpace Default role')
+                  else:
+                    logger.info('No WorkSpace Default Role Found')
+
+                  logger.info("Sending SUCCESS Signal back to stack - ") 
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                else:
+                  logger.info("Sending SUCCESS Signal back to stack - ") 
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                  
+              except botocore.exceptions.ClientError as error:
+                if error.response['Error']['Code'] == 'NoSuchEntity':
+                  print('Error Message: {}'.format(error.response['Error']['Message']))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                else:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Response': 'Failure'})
+                  raise error
+
+  CleanUpLambdaFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: cloudformation.amazonaws.com
+      FunctionName: !GetAtt CleanUpLambdaFunction.Arn
+      SourceAccount: !Sub ${AWS::AccountId}
+      SourceArn: !Sub ${AWS::StackId}
+  CleanUpLambdaExecutionRole:
+    DependsOn:
+      - WaitCondition
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - EIAMPolicyWildcardResource
+          ignore_reasons:
+            - EIAMPolicyWildcardResource: "Scope is limited to least privilege"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName:
+          Fn::Sub: ${AWS::StackName}-cleanup-lambda-execution-role-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+            - iam:GetRole
+            - iam:DeleteRolePolicy
+            - iam:DetachRolePolicy
+            - iam:ListAttachedRolePolicies
+            Resource:
+            - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+          - Effect: Allow
+            Action:
+              - iam:GetRole
+              - iam:GetPolicy
+              - iam:DetachRolePolicy
+              - iam:ListRoleTags
+              - iam:ListRolePolicies
+              - iam:DeleteRolePolicy
+            Resource:
+              - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/workspaces_DefaultRole
+              - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonWorkSpacesServiceAccess
+              - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonWorkSpacesSelfServiceAccess
+          - Effect: Allow
+            Action:
+            - ec2:DescribeInstances
+            Resource:
+             - '*'
+          - Effect: Allow
+            Action:
+            - iam:GetInstanceProfile
+            Resource:
+             - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/*
+          - Effect: Allow
+            Action:
+            - ec2:ModifyInstanceAttribute
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+              - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+              #- Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${DomainControllersSGID}
+              #- Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${DirectoryServiceWorkSpaceSG}
+          - Effect: Allow
+            Action:
+            - ec2:DeleteNetworkInterface
+            - ec2:DeleteSecurityGroup
+            Resource:
+              - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+              - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+          - Effect: Allow
+            Action:
+            - workspaces:DeregisterWorkspaceDirectory
+            - workspaces:ModifyClientProperties
+            - workspaces:ModifySelfservicePermissions
+            - workspaces:ModifyWorkspaceAccessProperties
+            - workspaces:ModifyWorkspaceCreationProperties
+            - workspaces:RestoreWorkspace
+            - ds:AuthorizeApplication
+            - ds:UnauthorizeApplication
+            - ds:ConnectDirectory
+            - ds:DeleteDirectory
+            - ds:UpdateRadius
+            - ds:UpdateSettings
+            - ds:DisableRadius
+            - ds:EnableRadius
+            - ds:RemoveIpRoutes
+            - ds:VerifyTrust
+            Resource:
+              - !Join ['',['arn:',!Ref AWS::Partition,':workspaces:',!Ref AWS::Region,':', !Ref AWS::AccountId,':','directory/',!Ref DirectoryID]]
+              - !Join ['',['arn:',!Ref AWS::Partition,':ds:',!Ref AWS::Region,':', !Ref AWS::AccountId,':','directory/',!Ref DirectoryID]]
+          - Effect: Allow
+            Action:
+            - workspaces:DescribeWorkspaces
+            - workspaces:DescribeTags
+            - workspaces:DescribeWorkspaceDirectories
+            - ds:DescribeDirectories
+            - ec2:DescribeInternetGateways
+            - ec2:DescribeSecurityGroups
+            - ec2:DescribeRouteTables
+            - ec2:DescribeVpcs
+            - ec2:DescribeSubnets
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DescribeAvailabilityZones
+            - sns:ListSubscriptions
+            - sns:ListTopics
+            - sns:GetSubscriptionAttributes
+            - kms:ListKeys
+            - kms:ListAliases
+            # - organizations:Describe*
+            # - organizations:List*
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - sns:ListSubscriptionsByTopic
+            - sns:GetTopicAttributes
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:*
+Outputs:
+  WorkspacesRegistrationCode:
+    Description: The Registration Code for the launched WorkSpace
+    Value: !GetAtt WorkSpaceRegCodeRetriever.RegistrationCode
+    Export:
+      Name: AWS-QuickStart-WorkSpace-RegistrationCode
+  WorkSpaceID:
+    Description: The WorkSpace ID for User's WorkSpace
+    Value: !Ref 'WorkSpace'
+    Export:
+      Name: AWS-QuickStart-WorkSpaceID
+  DomainUser:
+    Description: WorkSpace Users' username
+    Value: !Ref 'DomainUser'
+    Export:
+      Name: AWS-QuickStart-WorkSpace-Username
+  SNSLambdaPublisherExecutionRole:
+    Description: 'Role to be assumed by lambda SNS publisher'
+    Value: !Ref SNSDeliveryLambdaExecutionRoleExportValue
+    Export:
+      Name: !Sub '${SNSDeliveryLambdaExecutionRoleExportName}'
+  SNSStackStatusTopic:
+    Description: 'Topic to publish emails to'
+    Value: !Ref SNSStackStatusTopicExportValue
+    Export:
+      Name: !Sub '${SNSStackStatusTopicExportName}'
