@@ -1,0 +1,482 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This templates uses the provided Directory Service ID launch WorkSpace for an existing domain user. It also creates RADIUS solution for the WorkSpaces directory. **WARNING** This template creates Amazon EC2
+  Linux instance, RDS, and related resources. You'll be billed for the AWS resources used if you create a stack from this template. (qs-1td6osa6h)
+Metadata:
+  QSLint:
+    #'Adding exclusions to resource * for describe IAM actions'
+    Exclusions: [ W9002, W9003, W9006 ]
+  cfn-lint:
+    config:
+      ignore_checks:
+        - W9006
+        - E0002
+        - E9101
+        - W9001
+  QuickStartDocumentation:
+    EntrypointName: Parameters for deploying MFA-enabled Workspaces into existing managed Directory Service
+    Order: '1'
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: WorkSpaces and WorkSpaces directory configuration
+        Parameters:
+          - DomainUser
+          - DomainUserPassword
+          - DirectoryID
+          - BindDN
+          - BaseDN
+          - Tenancy
+          - EnableSelfService
+          - EnableWorkDocs
+          - BundleId
+          - ComputeTypeName
+          - RunningMode
+          - UserVolumeEncryptionEnabled
+          - RootVolumeEncryptionEnabled
+          - VolumeEncryptionKey
+          - UserVolumeSizeGib
+          - RootVolumeSizeGib
+      - Label:
+          default: RADIUS Server and database configuration
+        Parameters:
+          - KeyPairName
+          - VPCID
+          - VPCCIDR
+          - PrivateSubnet1ID
+          - PrivateSubnet2ID
+          - PublicSubnet1ID
+          - PublicSubnet2ID
+          - RADIUSServerInstanceType
+          - LinOTPDBName
+          - LinOTPAdminPassword
+          - LinOTPReamlName
+      - Label:
+          default: AWS solution configuration
+        Parameters:
+          - QSS3BucketName
+          - QSS3BucketRegion
+          - QSS3KeyPrefix
+      - Label:
+          default: SNS/KMS configurations
+        Parameters:
+          - QuickStartAdminEmail
+    ParameterLabels:
+      VPCCIDR:
+        default: VPC CIDR for Radius
+      KeyPairName:
+        default: Key pair name
+      DomainUser:
+        default: Existing domain user name to create WorkSpace
+      DomainUserPassword:
+        default: Password of existing domain user 
+      DirectoryID:
+        default: Directory ID of existing Directory Service
+      BindDN:
+        default: BindDN of existing domain user
+      BaseDN:
+        default: BaseDN of existing domain user
+      Tenancy:
+        default: WorkSpaces VPC tenancy
+      BundleId:
+        default: WorkSpace bundle ID
+      ComputeTypeName:
+        default: 'Workspaces compute type'
+      RunningMode:
+        default: WorkSpaces running mode
+      UserVolumeEncryptionEnabled:
+        default: Encrypt WorkSpace user volume
+      RootVolumeEncryptionEnabled:
+        default: Encrypt WorkSpace user volume
+      VolumeEncryptionKey:
+        default: Enter WorkSpace KMS key to encrypt volumes 
+      UserVolumeSizeGib:
+        default: Size of WorkSpace user volume storage
+      RootVolumeSizeGib:
+        default: Size of WorkSpace root volume storage
+      QSS3BucketName:
+        default: S3 bucket name
+      QSS3BucketRegion:
+        default: S3 bucket region
+      QSS3KeyPrefix:
+        default: S3 key prefix
+      QuickStartAdminEmail:
+        default: Admin email for notifications
+Parameters:
+  KeyPairName:
+    Description: >-
+      Public/private key pairs to securely connect to your instance.
+      after it launches
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    
+##### WorkSpaces Configuration
+  DomainUser:
+    AllowedPattern: '[a-zA-Z0-9]*'
+    Default: JaneDoe
+    Description: User name for AD account for launching WorkSpace. This user must have LDAP bind permissions.
+    MaxLength: '25'
+    MinLength: '5'
+    Type: String
+  DomainUserPassword:
+    AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
+    Description: Password for WorkSpace user account. Minimum of 8 characters containing letters, numbers, and symbols.
+    MaxLength: '32'
+    MinLength: '8'
+    NoEcho: 'true'
+    Type: String
+  DirectoryID:
+    Default: 'd-12345abced'
+    Description: Existing Directory Service ID. Use to register WorkSpaces.
+    MaxLength: '12'
+    MinLength: '12'
+    Type: String
+  BindDN:
+    Default: 'CN=domainuser,CN=Users,DC=example,DC=com'
+    Description: BindDN for existing domain user in AD. 
+    Type: String
+  BaseDN:
+    Default: 'CN=Users,DC=example,DC=com'
+    Description: BaseDN for existing domain user in AD. 
+    Type: String
+  Tenancy:
+    AllowedValues:
+      - 'DEDICATED'
+      - 'SHARED'
+    Default: 'SHARED'
+    Description: WorkSpace directory is dedicated or shared. To use Bring Your Own License (BYOL) images, set this value to DEDICATED and enable your AWS account for BYOL. If your account hasn't been enabled for BYOL, you'll receive an InvalidParameterValuesException error.
+    Type: String
+  EnableWorkDocs:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: Amazon WorkDocs is enabled or disabled. If enabled and WorkDocs isn't available in the region, you'll receive an OperationNotSupportedException error. Set EnableWorkDocs to disabled and try again.
+    Type: String
+  EnableSelfService:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Self-service capabilities are enabled or disabled.
+    Type: String
+  RootVolumeEncryptionEnabled:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Data stored on root volume is encrypted.
+    Type: String
+  UserVolumeEncryptionEnabled:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Data stored on user volume is encrypted.
+    Type: String
+  VolumeEncryptionKey:
+    Type: String
+    Default: alias/aws/workspaces
+    Description: Symmetric AWS KMS key used to encrypt data stored on your WorkSpace. WorkSpaces doesn't support asymmetric KMS keys. Specify KMS key ID.
+  RootVolumeSizeGib:
+    Default: '80'
+    Description: Size of user storage. Refer to Modify Volume Sizes - https://docs.aws.amazon.com/workspaces/latest/adminguide/modify-workspaces.html#change_volume_sizes.
+    Type: Number
+  UserVolumeSizeGib:
+    Default: '50'
+    Description: Size of user storage. Refer to Modify Volume Sizes - https://docs.aws.amazon.com/workspaces/latest/adminguide/modify-workspaces.html#change_volume_sizes.
+    Type: Number
+  BundleId:
+    Default: 'wsb-fn373c5rw'
+    AllowedPattern: '^wsb-[0-9a-z]{8,63}$'
+    Description: Identifier of bundle for WorkSpace. Use DescribeWorkspaceBundles to list available bundles. Provided bundle ID is for PCoIP streaming protocol.
+    Type: String
+  ComputeTypeName:
+    Default: 'PERFORMANCE'
+    AllowedValues:
+      - VALUE
+      - STANDARD
+      - POWERPRO
+      - POWER
+      - PERFORMANCE
+      - GRAPHICSPRO
+      - GRAPHICS
+    Description: Compute type valid values are VALUE | STANDARD | PERFORMANCE | POWER | GRAPHICS | POWERPRO | GRAPHICSPRO. Ensure bundle ID supports compute type selected. 
+    Type: String
+  RunningMode:
+    Default: 'AUTO_STOP'
+    AllowedValues:
+      - ALWAYS_ON
+      - AUTO_STOP
+    Description: Select Workspaces running mode.
+    Type: String
+  QSS3BucketName:
+    AllowedPattern: ^[0-9a-z]+([0-9a-z-\.]*[0-9a-z])*$
+    ConstraintDescription: >-
+      The S3 bucket name can include numbers, lowercase letters, 
+      and hyphens (-), but it cannot start or end with a hyphen.
+    Default: 'aws-quickstart'
+    Description: >-
+      Name of the S3 bucket for your copy of the deployment assets. Keep the default
+      name unless you are customizing the template. Changing the name updates code 
+      references to point to a new location.
+    MinLength: 3
+    MaxLength: 63
+    Type: 'String'
+  QSS3BucketRegion:
+    Default: us-east-1
+    Description: >-
+      AWS Region where the S3 bucket (QSS3BucketName) is hosted. Keep 
+      the default Region unless you are customizing the template. Changing the Region 
+      updates code references to point to a new location. When using your own bucket, 
+      specify the Region.
+    Type: String
+  QSS3KeyPrefix:
+    AllowedPattern: ^([0-9a-zA-Z!-_\.\*'\(\)/]+/)*$
+    ConstraintDescription: >-
+      The S3 key prefix can include numbers, lowercase letters, uppercase letters, 
+      hyphens (-), underscores (_), periods (.), asterisks (*), single quotes ('),
+      open parenthesis ((), close parenthesis ()), and forward slashes (/). End the
+      prefix with a forward slash.
+    Default: cfn-ps-freeradius-mfa-workspaces/
+    Description: >-
+      S3 key prefix that is used to simulate a folder for your copy of the 
+      deployment assets. Keep the default prefix unless you are customizing 
+      the template. Changing the prefix updates code references to point to 
+      a new location.
+    Type: 'String'
+
+   ##### RADIUS Server Configuration
+  VPCID:
+    Description: VPC ID for Workspaces.
+    Type: List<AWS::EC2::VPC::Id>
+  VPCCIDR:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter (must be in format x.x.x.x/16-28).
+    Default: 10.0.0.0/16
+    Description: CIDR Block for VPC.
+    Type: String
+  PrivateSubnet1ID:
+    Description: Choose WorkSpaces private subnet 1 in Availability Zone 1 (example-subnet-a0246dcd).
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnet2ID:
+    Description: Choose WorkSpaces private subnet 2 in Availability Zone 2 (example-subnet-a0246dcd).
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnet1ID:
+    Description: ID of public subnet 1 used for ALB (example-subnet-a0246dcd).
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnet2ID:
+    Description: ID of public subnet 2 used for ALB (example-subnet-e3246d8e).
+    Type: AWS::EC2::Subnet::Id
+  RADIUSServerInstanceType:
+    AllowedValues:
+      - t2.medium
+      - t3.medium
+      - t2.large
+      - t3.large
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+    Default: t3.large
+    Description: Amazon EC2 instance type for RADIUS Server.
+    Type: String
+  LinOTPDBName:
+    Type: String
+    Default: LINOTP
+    Description: RDS database name.
+  LinOTPAdminPassword:
+    AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
+    Description: Password of user account used to manage user enrollment and LinOTP portal. Minimum 8 characters containing letters, numbers and symbols.
+    MaxLength: '32'
+    MinLength: '8'
+    NoEcho: 'true'
+    Type: String
+  LinOTPReamlName:
+    Default: QSWSRealm
+    AllowedPattern: '[a-zA-Z0-9]*'
+    Description: Realm name for LinOTP/LDAP integration. Minimum 5 and maximum 12 characters. Default is QSWSRealm. 
+    MaxLength: '12'
+    MinLength: '5'
+    NoEcho: 'true'
+    Type: String
+  ## SNS Configuration
+  QuickStartAdminEmail:
+    Description: 'User email for notifications after successful creation of stack.'
+    Type: String
+    AllowedPattern: '[^@]+@[^@]+\.[^@]+'
+
+Conditions:
+  UsingDefaultBucket: !Equals 
+    - !Ref QSS3BucketName
+    - aws-ia-us-east-1
+Resources:
+  Macro:
+    Type: AWS::CloudFormation::Macro
+    Properties:
+      Name: WorkSpaceDefaultRoleMacro
+      FunctionName: !GetAtt WSIAMFunc.Arn
+  WSIAMFunc:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: !Sub ${AWS::StackName}
+        Handler: index.handler
+        Runtime: python3.8
+        Role: !GetAtt LambdaExecutionRole.Arn
+        Code:
+          ZipFile: |  
+            import boto3
+            import json
+            import logging
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+            client = boto3.client('iam')
+            def handler(event, context):
+              try:
+                fragment = event['fragment']
+                client.get_role(RoleName='workspaces_DefaultRole')
+                resp = {'requestId': event['requestId'], 'status': 'success','fragment': fragment}
+                return resp      
+              except client.exceptions.NoSuchEntityException:
+                resources_to_be_modified = {}
+                resources_to_be_modified = event['fragment']['Resources']
+                resources_to_be_modified['WorkspaceDefaultRole'] = {'Properties':{'RoleName':'workspaces_DefaultRole','Tags':[{'Key':'Created_By','Value':'WorkSpacesQuickstart_SC3a'}],'ManagedPolicyArns':['arn:aws:iam::aws:policy/AmazonWorkSpacesServiceAccess','arn:aws:iam::aws:policy/AmazonWorkSpacesSelfServiceAccess'],'AssumeRolePolicyDocument':{'Statement':[{'Action':['sts:AssumeRole'],'Effect':'Allow','Principal':{'Service':['workspaces.amazonaws.com']}}],'Version':'2012-10-17'},'Path':'/'}}
+                resources_to_be_modified['WorkspaceDefaultRole']['Type'] = 'AWS::IAM::Role'
+                event['fragment']['Resources'] = resources_to_be_modified
+                resp = {'requestId': event['requestId'], 'status': 'success','fragment': fragment}
+                return resp
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: cloudformation.amazonaws.com
+      FunctionName: !GetAtt WSIAMFunc.Arn
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName:
+          Fn::Sub: ${AWS::StackName}-lambda-execution-role-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+            - iam:GetRole
+            Resource:
+            - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+
+  DomainUserSecrets:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub DomainUserSecrets-${AWS::StackName}
+      Description: Domain user secrets in existing Directory Service.
+      SecretString: !Sub '{"username":${DomainUser},"password":"${DomainUserPassword}"}'
+  DomainUserBindDN:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: BindDN of existing domain user. Used for LinOTP LDAP connection. 
+      Name: /LinOTP/Config/extAD/BindDN
+      Type: String
+      Value: !Ref BindDN
+  DomainUserBaseDN:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: BaseDN of existing domain User. Used for LinOTP LDAP connection. 
+      Name: /LinOTP/Config/extAD/BaseDN
+      Type: String
+      Value: !Ref BaseDN
+  DirectoryIDinSSM:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: BaseDN of existing domain user. Used for LinOTP LDAP connection. 
+      Name: /LinOTP/Config/extAD/DirectoryID
+      Type: String
+      Value: !Ref DirectoryID
+
+  NotifyStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub
+        - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/notification.template.yaml'
+        - S3Region: !If [UsingDefaultBucket, !Ref AWS::Region, !Ref QSS3BucketRegion]
+          S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      Parameters:
+        QuickStartAdminEmail: !Ref QuickStartAdminEmail
+  WorkSpacesStack:
+    DependsOn:
+      - Macro
+      - NotifyStack
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub
+        - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/workspace-3.template.yaml'
+        - S3Region: !If [UsingDefaultBucket, !Ref AWS::Region, !Ref QSS3BucketRegion]
+          S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      Parameters:
+        DirectoryID: !Ref 'DirectoryID'
+        DomainUser: !Ref 'DomainUser'
+        DomainUserPassword: !Ref 'DomainUserPassword'
+        BundleId: !Ref 'BundleId'  
+        EnableWorkDocs: !Ref 'EnableWorkDocs'
+        EnableSelfService: !Ref 'EnableSelfService'
+        Tenancy: !Ref 'Tenancy'
+        ComputeTypeName: !Ref 'ComputeTypeName'
+        RunningMode: !Ref 'RunningMode'
+        RootVolumeSizeGib: !Ref 'RootVolumeSizeGib'
+        UserVolumeSizeGib: !Ref 'UserVolumeSizeGib'
+        VolumeEncryptionKey: !Ref 'VolumeEncryptionKey'
+        UserVolumeEncryptionEnabled: !Ref 'UserVolumeEncryptionEnabled'
+        RootVolumeEncryptionEnabled: !Ref 'RootVolumeEncryptionEnabled'
+        SNSDeliveryLambdaExecutionRoleExportName: !Sub '${AWS::StackName}-LambdaSNSPublisherRole'
+        SNSStackStatusTopicExportName: !Sub '${AWS::StackName}-SNSStackStatusTopic'
+        SNSDeliveryLambdaExecutionRoleExportValue: !GetAtt 'NotifyStack.Outputs.SNSDeliveryLambdaExecutionRole'
+        SNSStackStatusTopicExportValue: !GetAtt 'NotifyStack.Outputs.SNSStackTopic'
+        QSS3BucketName: !Ref 'QSS3BucketName'
+        QSS3KeyPrefix: !Ref 'QSS3KeyPrefix'
+  RadiusStack:
+    DependsOn:
+      - Macro
+      - WorkSpacesStack
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub
+        - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/radius-3.template.yaml'
+        - S3Region: !If [UsingDefaultBucket, !Ref AWS::Region, !Ref QSS3BucketRegion]
+          S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      Parameters:
+        VPCID: !Join [",", !Ref VPCID]
+        PrivateSubnet1ID: !Ref 'PrivateSubnet1ID'
+        PrivateSubnet2ID: !Ref 'PrivateSubnet2ID'
+        PublicSubnet1ID: !Ref 'PublicSubnet1ID'
+        PublicSubnet2ID: !Ref 'PublicSubnet2ID'
+        DomainUser: !Ref 'DomainUser'
+        AdminUserSecrets: !Ref 'DomainUserSecrets'
+        VPCCIDR: !Ref 'VPCCIDR'
+        RADIUSServerInstanceType: !Ref 'RADIUSServerInstanceType'
+        LinOTPDBName: !Ref 'LinOTPDBName'
+        LinOTPAdminPassword: !Ref 'LinOTPAdminPassword'
+        LinOTPReamlName: !Ref 'LinOTPReamlName'
+        KeyName: !Ref 'KeyPairName'
+        SNSDeliveryLambdaExecutionRole: !Sub '${AWS::StackName}-LambdaSNSPublisherRole'
+        SNSStackStatusTopic: !Sub '${AWS::StackName}-SNSStackStatusTopic'
