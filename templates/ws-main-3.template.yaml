@@ -214,7 +214,7 @@ Parameters:
     ConstraintDescription: >-
       The S3 bucket name can include numbers, lowercase letters, 
       and hyphens (-), but it cannot start or end with a hyphen.
-    Default: 'aws-quickstart'
+    Default: aws-ia
     Description: >-
       Name of the S3 bucket for your copy of the deployment assets. Keep the default
       name unless you are customizing the template. Changing the name updates code 
@@ -312,7 +312,7 @@ Parameters:
 Conditions:
   UsingDefaultBucket: !Equals 
     - !Ref QSS3BucketName
-    - aws-ia-us-east-1
+    - aws-ia
 Resources:
   Macro:
     Type: AWS::CloudFormation::Macro
