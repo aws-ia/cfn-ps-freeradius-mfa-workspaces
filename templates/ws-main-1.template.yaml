@@ -181,7 +181,7 @@ Metadata:
         ConstraintDescription: >-
           The S3 bucket name can include numbers, lowercase letters, 
           and hyphens (-), but it cannot start or end with a hyphen.
-        Default: 'aws-quickstart'
+        Default: aws-ia
         Description: >-
           Name of the S3 bucket for your copy of the deployment assets. Keep the default
           name unless you are customizing the template. Changing the name updates code 
@@ -510,7 +510,7 @@ Parameters:
     ConstraintDescription: >-
       The S3 bucket name can include numbers, lowercase letters, 
       and hyphens (-), but it cannot start or end with a hyphen.
-    Default: 'aws-quickstart'
+    Default: aws-ia
     Description: >-
       Name of the S3 bucket for your copy of the deployment assets. Keep the default
       name unless you are customizing the template. Changing the name updates code 
@@ -710,7 +710,7 @@ Parameters:
 Conditions:
   IncludeRDGW: !Not [!Equals [!Ref NumberOfRDGWHosts, '0']]
   IsTwoAz: !Equals [!Ref 'NumberOfAZs', '2']
-  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-ia-us-east-1']
+  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-ia']
   WorkSpaceEncryptRootVol: !Equals [!Ref RootVolumeEncryptionEnabled, 'true']
   WorkSpaceEncryptUserVol: !Equals [!Ref UserVolumeEncryptionEnabled, 'true']
   KMSVolEncrptionCheck: !And [ Condition: WorkSpaceEncryptRootVol, Condition: WorkSpaceEncryptUserVol]
