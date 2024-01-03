@@ -21,7 +21,7 @@ tests:
       DomainAdminUser: Admin
       DomainDNSName: funfactory.com
       DomainNetBIOSName: funfactory
-      KeyPairName: taskcatTest
+      KeyPairName: $[taskcat_getkeypair]
       NumberOfRDGWHosts: '0'
       PrivateSubnet1CIDR: 10.0.0.0/19
       PrivateSubnet2CIDR: 10.0.32.0/19
@@ -59,7 +59,7 @@ tests:
       DomainAdminUser: Admin
       DomainDNSName: nbafinals.com
       DomainNetBIOSName: nbafinals
-      KeyPairName: taskcatTest
+      KeyPairName: $[taskcat_getkeypair]
       NumberOfRDGWHosts: '0'
       PrivateSubnet1CIDR: 10.0.0.0/19
       PrivateSubnet2CIDR: 10.0.32.0/19
